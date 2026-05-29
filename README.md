@@ -1,5 +1,7 @@
 # mcp-uapi
 
+> **Work in progress — Proof of Concept.** APIs, flags, and scripting interfaces may change without notice.
+
 `mcp-uapi` is a Go MCP server that exposes Linux user-mode APIs from `golang.org/x/sys/unix` through a single JavaScript `eval` tool. It is designed for embedded systems testing workflows: attack surface reconnaissance, socket/client experiments, ioctl exploration, ptrace memory probes, fuzzing harnesses, and compact proof-of-concept development.
 
 The server does not implement fuzzing policy, scheduling, minimization, or corpus management. Instead, it provides reliable building blocks that AI agents compose inside the built-in Goja scripting layer.
@@ -79,80 +81,97 @@ Useful startup flags:
 - `--max-buffer-bytes`: maximum managed buffer or mapping size. Default: 16 MiB.
 - `--allow-raw-fd`: permit tools to operate on integer FDs not opened by this server.
 
-## Cross Builds
+## Supported Targets
 
-Build for the host platform:
+All targets are Linux-only. Cross builds are pure Go with cgo disabled.
+
+| Target              | Binary                         |
+|---------------------|--------------------------------|
+| `linux/386`         | `bin/mcp-uapi-linux-386`       |
+| `linux/amd64`       | `bin/mcp-uapi-linux-amd64`     |
+| `linux/arm`         | `bin/mcp-uapi-linux-arm`       |
+| `linux/arm64`       | `bin/mcp-uapi-linux-arm64`     |
+| `linux/loong64`     | `bin/mcp-uapi-linux-loong64`   |
+| `linux/mips`        | `bin/mcp-uapi-linux-mips`      |
+| `linux/mips64`      | `bin/mcp-uapi-linux-mips64`    |
+| `linux/mips64le`    | `bin/mcp-uapi-linux-mips64le`  |
+| `linux/mipsle`      | `bin/mcp-uapi-linux-mipsle`    |
+| `linux/ppc64`       | `bin/mcp-uapi-linux-ppc64`     |
+| `linux/ppc64le`     | `bin/mcp-uapi-linux-ppc64le`   |
+| `linux/riscv64`     | `bin/mcp-uapi-linux-riscv64`   |
+| `linux/s390x`       | `bin/mcp-uapi-linux-s390x`     |
+
+Build a specific target:
 
 ```bash
-./scripts/build.sh
-```
-
-Build for embedded Linux targets:
-
-```bash
-./scripts/build-target.sh linux/amd64
 ./scripts/build-target.sh linux/arm64
-./scripts/build-target.sh linux/arm/v7
+./scripts/build-target.sh linux/arm
+./scripts/build-target.sh linux/riscv64
 ```
 
-The output is written under `bin/` with the target tuple in the filename. Cross builds are pure Go and disable cgo by default.
+Build all targets at once:
+
+```bash
+./scripts/build-all-targets.sh
+```
 
 ## Examples
 
-Create a local socketpair and exchange bytes with `eval`:
+Create a local socketpair and exchange bytes:
 
-```json
-{
-  "name": "eval",
-  "arguments": {
-    "script": "const pair = sys.socketpair({handles:['a','b']}); sys.write({handle:'a', data_utf8:'ping'}); const got = sys.read({handle:'b', length:4, encoding:'utf8'}); sys.close({handle:'a'}); sys.close({handle:'b'}); return got;"
-  }
-}
+```javascript
+const pair = sys.socketpair({handles: ['a', 'b']});
+sys.write({handle: 'a', data_utf8: 'ping'});
+const got = sys.read({handle: 'b', length: 4, encoding: 'utf8'});
+sys.close({handle: 'a'});
+sys.close({handle: 'b'});
+return got;
 ```
 
 Prepare an ioctl buffer and call `FIONREAD` on a socket:
 
-```json
-{
-  "name": "eval",
-  "arguments": {
-    "script": "sys.bufferAlloc({name:'ioctl', size:8}); const ioctl = sys.ioctl({handle: args.socket, request:'FIONREAD', buffer:'ioctl', buffer_length:4}); const argp = sys.bufferRead({name:'ioctl', length:4, encoding:'hex'}); return {ioctl, argp};",
-    "args": {"socket": "sock"}
-  }
-}
+```javascript
+sys.bufferAlloc({name: 'ioctl', size: 8});
+const ioctl = sys.ioctl({
+  handle: args.socket,
+  request: 'FIONREAD',
+  buffer: 'ioctl',
+  buffer_length: 4,
+});
+const argp = sys.bufferRead({name: 'ioctl', length: 4, encoding: 'hex'});
+return {ioctl, argp};
 ```
 
 Attach to a permitted child process and read memory:
 
-```json
-{
-  "name": "eval",
-  "arguments": {
-    "script": "const attach = sys.ptraceAttach({pid: args.pid, wait:true, timeout_ms:5000}); if (!attach.ok) return attach; try { return sys.ptraceRead({pid: args.pid, address: args.address, length:64, encoding:'hex'}); } finally { sys.ptraceDetach({pid: args.pid}); }",
-    "args": {"pid": 1234, "address": "0x7ffd00000000"}
-  }
+```javascript
+const attach = sys.ptraceAttach({pid: args.pid, wait: true, timeout_ms: 5000});
+if (!attach.ok) return attach;
+try {
+  return sys.ptraceRead({pid: args.pid, address: args.address, length: 64, encoding: 'hex'});
+} finally {
+  sys.ptraceDetach({pid: args.pid});
 }
 ```
 
-Copy a file with the Go `os` and `io` scripting globals:
+Copy a file with the `os` and `io` scripting globals:
 
-```json
-{
-  "name": "eval",
-  "arguments": {
-    "script": "os.writeFile({name: args.path, data_utf8:'hello', perm:'0600'}); const src = os.open({name: args.path, handle:'src'}); const dst = os.create({name: args.copy, handle:'dst'}); try { const copied = io.copy({dst:{handle:'dst'}, src:{handle:'src'}}); const got = os.readFile({name: args.copy, encoding:'utf8'}); return {copied, got}; } finally { os.fileClose({handle:'src'}); os.fileClose({handle:'dst'}); }",
-    "args": {"path": "/tmp/mcp-uapi-src.txt", "copy": "/tmp/mcp-uapi-copy.txt"}
-  }
+```javascript
+os.writeFile({name: args.path, data_utf8: 'hello', perm: '0600'});
+const src = os.open({name: args.path, handle: 'src'});
+const dst = os.create({name: args.copy, handle: 'dst'});
+try {
+  const copied = io.copy({dst: {handle: 'dst'}, src: {handle: 'src'}});
+  const got = os.readFile({name: args.copy, encoding: 'utf8'});
+  return {copied, got};
+} finally {
+  os.fileClose({handle: 'src'});
+  os.fileClose({handle: 'dst'});
 }
 ```
+
+More ready-to-run scripts live in [examples/](examples/).
 
 ## Documentation
 
-- [docs/API.md](docs/API.md): scripting groups, result model, and workflow notes.
-- [docs/SCRIPTING.md](docs/SCRIPTING.md): Goja `eval` globals, wrappers, and examples.
-- [docs/EXAMPLES.md](docs/EXAMPLES.md): concrete eval workflows.
-- [docs/SECURITY.md](docs/SECURITY.md): safety model and deployment guidance.
-
-## Reusable Scripts
-
-- [examples/001-network-interfaces-ioctl.js](examples/001-network-interfaces-ioctl.js): enumerate Linux network interfaces with `struct ifreq` and `SIOCGIF*` ioctls.
+Reference documentation lives in [docs/](docs/).
