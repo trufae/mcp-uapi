@@ -53,6 +53,8 @@ type ScriptingAPIInfo struct {
 	NotAvailable   []string           `json:"not_available"`
 	Conventions    []string           `json:"conventions"`
 	UAPIWrappers   []string           `json:"uapi_wrappers"`
+	OSWrappers     []string           `json:"os_wrappers"`
+	IOWrappers     []string           `json:"io_wrappers"`
 	Limits         map[string]any     `json:"limits"`
 	ResultShape    map[string]string  `json:"result_shape"`
 	Examples       []ScriptingExample `json:"examples"`
@@ -81,16 +83,17 @@ func Capabilities() CapabilityDocument {
 			APIReferenceResource:  "uapi://api-reference",
 			ResourceAccess:        "Resources are MCP resources read by the client with the MCP resources/read operation. They are not available from JavaScript eval; there is no uapi.request, sys.request, fetch, HTTP client, require, or import inside the eval runtime.",
 			ScriptingPrompt:       "uapi_eval_quickstart",
-			SafeEvalProbe:         `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, uname: sys.uname(), openFlags: sys.constants({group:"open_flags"}).constants};`,
+			SafeEvalProbe:         `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, os: caps.scripting_api.os_wrappers, io: caps.scripting_api.io_wrappers, uname: sys.uname(), openFlags: sys.constants({group:"open_flags"}).constants};`,
 			EvalToolExample: map[string]any{
 				"name": "eval",
 				"arguments": map[string]any{
-					"script": `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers.length, uname: sys.uname()};`,
+					"script": `const caps = sys.capabilities(); return {name: caps.name, sys: caps.scripting_api.uapi_wrappers.length, os: caps.scripting_api.os_wrappers.length, io: caps.scripting_api.io_wrappers.length, uname: sys.uname()};`,
 				},
 			},
-			DoNotUse: []string{"uapi.request('GET', 'uapi://capabilities')", "sys.request('GET', 'uapi://capabilities')", "fetch('uapi://capabilities')", "calling uapi_* as public MCP tools"},
+			DoNotUse: []string{"uapi.request('GET', 'uapi://capabilities')", "sys.request('GET', 'uapi://capabilities')", "fetch('uapi://capabilities')", "require('fs')", "import('node:fs')", "os.exit/os.Exit", "calling uapi_* as public MCP tools"},
 			Notes: []string{
 				"The only public MCP tool is eval; syscall functionality is available inside the JavaScript sys/uapi object.",
+				"The JavaScript os and io globals provide Go standard-library style wrappers over managed handles and explicit byte encodings; they are not Node.js modules.",
 				"Read uapi://agent-guide, uapi://scripting-api, and uapi://api-reference through MCP resource APIs before composing nontrivial eval scripts.",
 				"Inside eval, use sys.capabilities() for the same machine-readable capability document; do not try to read MCP resources from JavaScript.",
 				"All handles returned by scripts are process-local to this MCP server instance.",
@@ -115,14 +118,15 @@ func Capabilities() CapabilityDocument {
 			{"process and resources", "Signal, wait, prctl, ptrace, query groups/resource usage, and adjust rlimits.", []string{"sys.kill", "sys.wait4", "sys.prctl", "sys.ptraceAttach", "sys.ptraceRead", "sys.ptraceWrite", "sys.ptraceCont", "sys.ptraceSyscall", "sys.ptraceDetach", "sys.getgroups", "sys.getresuid", "sys.getresgid", "sys.getrlimit", "sys.setrlimit", "sys.getrusage"}},
 			{"extended attributes and transfer", "Inspect and mutate xattrs, create anonymous memfd files, and move bytes between descriptors with kernel helpers.", []string{"sys.getxattr", "sys.lgetxattr", "sys.fgetxattr", "sys.listxattr", "sys.llistxattr", "sys.flistxattr", "sys.setxattr", "sys.lsetxattr", "sys.fsetxattr", "sys.removexattr", "sys.lremovexattr", "sys.fremovexattr", "sys.memfdCreate", "sys.sendfile", "sys.copyFileRange"}},
 			{"ioctl", "Invoke arbitrary ioctl requests with either integer arguments or managed buffer pointers.", []string{"sys.ioctl", "sys.bufferAlloc", "sys.bufferRead", "sys.bufferWrite"}},
-			{"JavaScript scripting", "Compose multi-step syscall workflows in one eval call with captured logs, args, timeouts, and JSON results.", []string{"eval", "sys.*", "uapi.*"}},
+			{"Go standard library scripting", "Use package-os and package-io style helpers for portable filesystem, environment, root, process, and stream workflows over the same managed handles.", []string{"os.readFile", "os.writeFile", "os.open", "os.openFile", "os.openRoot", "os.rootReadFile", "os.fileRead", "os.fileWrite", "io.copy", "io.copyN", "io.readAll", "io.readFull", "io.writeString"}},
+			{"JavaScript scripting", "Compose multi-step syscall and standard-library workflows in one eval call with captured logs, args, timeouts, and JSON results.", []string{"eval", "sys.*", "uapi.*", "os.*", "io.*"}},
 		},
 		Constants:      constantCatalog(),
 		Tools:          toolSummaries(),
 		Resources:      []string{"uapi://agent-guide", "uapi://capabilities", "uapi://api-reference", "uapi://scripting-api", "uapi://state"},
 		Prompts:        []string{"uapi_recon_quickstart", "uapi_eval_quickstart", "uapi_ptrace_memory_probe", "uapi_socket_fuzzing"},
 		ScriptingAPI:   scriptingAPIInfo(),
-		Implementation: []string{"The public MCP tool surface registers only eval; MCP resources and prompts remain available for discovery and documentation.", "MCP resource reads happen outside eval through the client; the JavaScript runtime intentionally has no uapi.request, sys.request, fetch, require, or import helpers.", "The scripting layer keeps FD, buffer, and mmap lifetime in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "Goja eval creates a fresh runtime per call and exposes sys and uapi aliases for synchronous Unix workflows."},
+		Implementation: []string{"The public MCP tool surface registers only eval; MCP resources and prompts remain available for discovery and documentation.", "MCP resource reads happen outside eval through the client; the JavaScript runtime intentionally has no uapi.request, sys.request, fetch, require, or import helpers.", "The scripting layer keeps FD, buffer, mmap, os.Root, and os.Process lifetime in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "Goja eval creates a fresh runtime per call and exposes sys/uapi plus os/io globals for synchronous Unix and Go standard-library workflows."},
 	}
 }
 
@@ -132,16 +136,19 @@ func scriptingAPIInfo() ScriptingAPIInfo {
 		Resource:       "uapi://scripting-api",
 		Engine:         "Goja (github.com/dop251/goja)",
 		ExecutionModel: "Each eval call runs a fresh synchronous JavaScript runtime inside a function body; use return for JSON results and console.* for captured logs.",
-		Globals:        []ScriptGlobalInfo{{"args", "Caller-provided JSON object."}, {"console", "Captured log/info/warn/error functions returned in the eval response."}, {"print", "Alias for console.log."}, {"sys", "Synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers."}, {"uapi", "Alias for sys for compatibility with older scripts."}},
-		NotAvailable:   []string{"uapi.request", "sys.request", "fetch", "XMLHttpRequest", "require", "import", "Node.js fs/net modules", "direct MCP resource reads from inside eval", "public uapi_* MCP tool calls"},
-		Conventions:    []string{"Call MCP resources/read outside eval for uapi://agent-guide, uapi://scripting-api, and uapi://api-reference.", "Call the MCP tool named eval with an object containing script, optional args, timeout_ms, max_log_entries, and max_result_bytes.", "Inside scripts, use sys.* or uapi.* only; sys and uapi are the same object.", "Every syscall-style helper returns ok=true on success or ok=false with errno fields for Linux errno failures.", "Close managed FDs and mappings explicitly with sys.close and sys.munmap when a script creates them."},
+		Globals:        []ScriptGlobalInfo{{"args", "Caller-provided JSON object."}, {"console", "Captured log/info/warn/error functions returned in the eval response."}, {"print", "Alias for console.log."}, {"sys", "Synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers."}, {"uapi", "Alias for sys for compatibility with older scripts."}, {"os", "Synchronous Go package os style wrappers for files, dirs, env, roots, processes, and File methods over managed handles."}, {"io", "Synchronous Go package io style wrappers for copy/read/write helpers over managed handle, buffer, path, data, and discard endpoints."}},
+		NotAvailable:   []string{"uapi.request", "sys.request", "fetch", "XMLHttpRequest", "require", "import", "Node.js fs/net modules", "direct MCP resource reads from inside eval", "public uapi_* MCP tool calls", "os.Exit/os.exit", "os.DirFS", "os.CopyFS", "File.SyscallConn", "persistent io.Reader interface objects"},
+		Conventions:    []string{"Call MCP resources/read outside eval for uapi://agent-guide, uapi://scripting-api, and uapi://api-reference.", "Call the MCP tool named eval with an object containing script, optional args, timeout_ms, max_log_entries, and max_result_bytes.", "Inside scripts, use sys.* or uapi.* for Linux syscalls, os.* for Go package os style workflows, and io.* for Go package io style copy/read/write workflows.", "Every syscall-style helper returns ok=true on success or ok=false with errno fields for Linux errno failures; os/io package errors return ok=false with error_name/error_type/path metadata when available.", "Close managed FDs, roots, and mappings explicitly with sys.close or os.fileClose, os.rootClose, and sys.munmap when a script creates them."},
 		UAPIWrappers:   scriptWrapperNames(),
+		OSWrappers:     scriptOSWrapperNames(),
+		IOWrappers:     scriptIOWrapperNames(),
 		Limits:         map[string]any{"default_timeout_ms": defaultEvalTimeoutMS, "max_timeout_ms": maxEvalTimeoutMS, "default_max_log_entries": defaultEvalLogEntries, "max_log_entries": maxEvalLogEntries},
 		ResultShape:    map[string]string{"ok": "true on successful script execution", "result": "JSON value returned by the script", "logs": "captured console entries", "operations": "number of sys/uapi wrapper calls", "error": "script or argument error string when ok=false"},
 		Examples: []ScriptingExample{
-			{"safe_bootstrap", `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, uname: sys.uname()};`},
+			{"safe_bootstrap", `const caps = sys.capabilities(); return {name: caps.name, sys: caps.scripting_api.uapi_wrappers, os: caps.scripting_api.os_wrappers, io: caps.scripting_api.io_wrappers, uname: sys.uname()};`},
 			{"socketpair_roundtrip", `const pair = sys.socketpair({type:"SOCK_STREAM|SOCK_CLOEXEC"}); sys.write({handle: pair.handles[0], data_utf8:"ping"}); return sys.read({handle: pair.handles[1], length:4, encoding:"utf8"});`},
 			{"at_family_file", `const fd = sys.openat({path: args.path, flags:"O_RDWR|O_CREAT|O_CLOEXEC", mode:"0600"}); sys.write({handle: fd.handle, data_utf8:"hello"}); return sys.fstatat({path: args.path});`},
+			{"stdlib_copy", `os.writeFile({name: args.path, data_utf8:"hello", perm:"0600"}); const src = os.open({name: args.path}); const dst = os.create({name: args.copy}); try { return io.copy({dst:{handle: dst.handle}, src:{handle: src.handle}}); } finally { os.fileClose({handle: src.handle}); os.fileClose({handle: dst.handle}); }`},
 		},
 	}
 }
@@ -149,7 +156,9 @@ func scriptingAPIInfo() ScriptingAPIInfo {
 func constantCatalog() map[string]any {
 	return map[string]any{
 		"socket":      groupConstants("AF_UNIX", "AF_INET", "AF_INET6", "AF_NETLINK", "AF_PACKET", "SOCK_STREAM", "SOCK_DGRAM", "SOCK_RAW", "SOCK_SEQPACKET", "SOCK_NONBLOCK", "SOCK_CLOEXEC", "IPPROTO_TCP", "IPPROTO_UDP", "SOL_SOCKET", "SO_REUSEADDR", "SO_REUSEPORT", "SO_ERROR"),
-		"open_flags":  groupConstants("O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREAT", "O_EXCL", "O_TRUNC", "O_APPEND", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW", "O_SYNC"),
+		"open_flags":  groupConstants("O_RDONLY", "O_WRONLY", "O_RDWR", "O_CREATE", "O_CREAT", "O_EXCL", "O_TRUNC", "O_APPEND", "O_NONBLOCK", "O_CLOEXEC", "O_DIRECTORY", "O_NOFOLLOW", "O_SYNC"),
+		"go_os":       osConstants(),
+		"go_io":       ioConstants(),
 		"access":      groupConstants("F_OK", "R_OK", "W_OK", "X_OK", "AT_FDCWD", "AT_EACCESS", "AT_SYMLINK_NOFOLLOW", "AT_EMPTY_PATH"),
 		"at":          groupConstants("AT_FDCWD", "AT_SYMLINK_NOFOLLOW", "AT_REMOVEDIR", "AT_EMPTY_PATH", "AT_NO_AUTOMOUNT", "AT_EACCESS"),
 		"fcntl":       groupConstants("F_DUPFD", "F_DUPFD_CLOEXEC", "F_GETFD", "F_SETFD", "F_GETFL", "F_SETFL"),

@@ -34,6 +34,16 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	if !containsString(doc.ScriptingAPI.UAPIWrappers, "socketpair") || !containsString(doc.ScriptingAPI.UAPIWrappers, "ptraceRead") {
 		t.Fatalf("legacy scripting wrappers missing expected entries: %#v", doc.ScriptingAPI.UAPIWrappers)
 	}
+	for _, name := range []string{"readFile", "writeFile", "openRoot", "fileRead", "fileWrite", "rootReadFile"} {
+		if !containsString(doc.ScriptingAPI.OSWrappers, name) {
+			t.Fatalf("os scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.OSWrappers)
+		}
+	}
+	for _, name := range []string{"copy", "copyN", "readAll", "readFull", "writeString"} {
+		if !containsString(doc.ScriptingAPI.IOWrappers, name) {
+			t.Fatalf("io scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.IOWrappers)
+		}
+	}
 	for _, name := range []string{"openat", "fstatat", "statx", "eventfd", "memfdCreate", "getxattr", "copyFileRange"} {
 		if !containsString(doc.ScriptingAPI.UAPIWrappers, name) {
 			t.Fatalf("scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.UAPIWrappers)
@@ -44,10 +54,10 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 			t.Fatalf("rng global should not be documented: %#v", doc.ScriptingAPI.Globals)
 		}
 	}
-	if !containsString(doc.ScriptingAPI.NotAvailable, "uapi.request") || !containsString(doc.ScriptingAPI.NotAvailable, "fetch") {
+	if !containsString(doc.ScriptingAPI.NotAvailable, "uapi.request") || !containsString(doc.ScriptingAPI.NotAvailable, "fetch") || !containsString(doc.ScriptingAPI.NotAvailable, "os.Exit/os.exit") {
 		t.Fatalf("scripting API should document unavailable request/fetch helpers: %#v", doc.ScriptingAPI.NotAvailable)
 	}
-	for _, group := range []string{"open_flags", "at", "eventfd", "inotify", "statx", "rlimit"} {
+	for _, group := range []string{"open_flags", "at", "eventfd", "inotify", "statx", "rlimit", "go_os", "go_io"} {
 		if _, ok := doc.Constants[group]; !ok {
 			t.Fatalf("capabilities missing %s constants", group)
 		}

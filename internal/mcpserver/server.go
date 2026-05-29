@@ -34,6 +34,11 @@ type App struct {
 
 	nextMapHandle uint64
 	mappings      map[string]*mmapEntry
+
+	nextRootHandle    uint64
+	roots             map[string]*rootEntry
+	nextProcessHandle uint64
+	processes         map[string]*processEntry
 }
 
 type fdEntry struct {
@@ -66,10 +71,12 @@ func New(config Config) (*App, *server.MCPServer) {
 		config.MaxBufferBytes = defaultMaxBufferBytes
 	}
 	app := &App{
-		config:   config,
-		fds:      map[string]*fdEntry{},
-		buffers:  map[string]*bufferEntry{},
-		mappings: map[string]*mmapEntry{},
+		config:    config,
+		fds:       map[string]*fdEntry{},
+		buffers:   map[string]*bufferEntry{},
+		mappings:  map[string]*mmapEntry{},
+		roots:     map[string]*rootEntry{},
+		processes: map[string]*processEntry{},
 	}
 	srv := server.NewMCPServer(
 		"mcp-uapi",
@@ -89,7 +96,7 @@ func New(config Config) (*App, *server.MCPServer) {
 }
 
 func serverInstructions() string {
-	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, and uapi://capabilities using the MCP client resource-read operation. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, and uapi. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, xattrs, eventfd/inotify, process helpers, and ioctl. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, and sys.eventfd; raw integer FDs require --allow-raw-fd."
+	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, and uapi://capabilities using the MCP client resource-read operation. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, xattrs, eventfd/inotify, process helpers, and ioctl. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, and sys.eventfd; raw integer FDs require --allow-raw-fd."
 }
 
 func (a *App) Close() {
@@ -102,6 +109,14 @@ func (a *App) Close() {
 	for handle, fd := range a.fds {
 		_ = unix.Close(fd.FD)
 		delete(a.fds, handle)
+	}
+	for handle, root := range a.roots {
+		_ = root.Root.Close()
+		delete(a.roots, handle)
+	}
+	for handle, process := range a.processes {
+		_ = process.Process.Release()
+		delete(a.processes, handle)
 	}
 	for name := range a.buffers {
 		delete(a.buffers, name)
@@ -239,6 +254,8 @@ func (a *App) stateSnapshot() map[string]any {
 		"fds":              a.fdInfosLocked(),
 		"buffers":          a.bufferInfosLocked(),
 		"mappings":         a.mappingInfosLocked(),
+		"roots":            rootInfosLocked(a.roots),
+		"processes":        processInfosLocked(a.processes),
 	}
 }
 

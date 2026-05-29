@@ -1,6 +1,6 @@
 # API Reference
 
-Start by reading MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` with the MCP client resource-read operation. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, and mappings inside the JavaScript `sys`/`uapi` scripting API so agents do not need to juggle raw integer FDs.
+Start by reading MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` with the MCP client resource-read operation. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, mappings, roots, and processes inside the JavaScript `sys`/`uapi`, `os`, and `io` scripting APIs so agents do not need to juggle raw integer FDs.
 
 MCP resources are documentation and discovery surfaces outside the eval runtime. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval. Use `sys.capabilities()` inside eval when a script needs the machine-readable capability document.
 
@@ -34,11 +34,11 @@ Fields typed as integer or string accept numeric values, hex strings, or constan
 {"flags":"O_RDWR|O_CREAT|O_CLOEXEC"}
 ```
 
-Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `memfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `ioctl`, `prctl`, and `errno`.
+Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `memfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `ioctl`, `prctl`, `go_os`, `go_io`, and `errno`.
 
 ## Handles
 
-Managed handles are returned by script helpers that create resources. Use `handle` for normal FD helpers, `mapping` for memory mappings, and `name` for buffers. Raw FDs require `--allow-raw-fd`.
+Managed handles are returned by script helpers that create resources. Use `handle` for normal FD helpers, `mapping` for memory mappings, `name` for buffers, `root` or `handle` for `os.Root` wrappers, and process handles for `os.Process` wrappers. Raw FDs require `--allow-raw-fd`.
 
 ## Scripting Groups
 
@@ -53,6 +53,10 @@ Managed handles are returned by script helpers that create resources. Use `handl
 - Process and resources: `sys.kill`, `sys.wait4`, `sys.prctl`, `sys.ptraceAttach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceDetach`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.getrusage`.
 - Extended attributes and transfer: `sys.getxattr`, `sys.lgetxattr`, `sys.fgetxattr`, `sys.listxattr`, `sys.llistxattr`, `sys.flistxattr`, `sys.setxattr`, `sys.lsetxattr`, `sys.fsetxattr`, `sys.removexattr`, `sys.lremovexattr`, `sys.fremovexattr`, `sys.sendfile`, `sys.copyFileRange`.
 - Ioctl: `sys.ioctl` with `arg` or `buffer`/`buffer_offset`/`buffer_length`.
+- Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, env helpers, directory/stat helpers, and process helpers.
+- Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, and `io.pipe`.
+
+The `os` and `io` globals use lower camel-case names and also expose Go-style aliases such as `os.ReadFile` and `io.Copy`. File-returning `os` helpers return managed FD handles. Release them with `os.fileClose({handle})` or `sys.close({handle})`; release roots with `os.rootClose({root})`.
 
 ## Ptrace Workflow
 

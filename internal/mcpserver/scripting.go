@@ -115,6 +115,12 @@ func (a *App) handleEval(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	if err := vm.Set("sys", uapi); err != nil {
 		return toolError(err)
 	}
+	if err := vm.Set("os", env.osObject()); err != nil {
+		return toolError(err)
+	}
+	if err := vm.Set("io", env.ioObject()); err != nil {
+		return toolError(err)
+	}
 	timeoutErr := fmt.Errorf("script exceeded timeout_ms=%d", timeoutMS)
 	timer := time.AfterFunc(time.Duration(timeoutMS)*time.Millisecond, func() { vm.Interrupt(timeoutErr) })
 	stopContextInterrupt := context.AfterFunc(ctx, func() { vm.Interrupt(ctx.Err()) })

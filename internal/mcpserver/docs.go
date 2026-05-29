@@ -53,8 +53,10 @@ Available globals:
 - ` + "`console`" + ` and ` + "`print`" + `: captured logging.
 - ` + "`sys`" + `: synchronous Linux sys/unix scripting API.
 - ` + "`uapi`" + `: alias for ` + "`sys`" + ` for older scripts.
+- ` + "`os`" + `: synchronous Go package os style wrappers over managed handles, roots, processes, env, and filesystem helpers.
+- ` + "`io`" + `: synchronous Go package io style copy/read/write helpers over managed handles, buffers, paths, data, and discard endpoints.
 
-Not available in eval: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, Node.js modules, direct network clients, and direct MCP resource reads.
+Not available in eval: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, Node.js modules, direct network clients, direct MCP resource reads, and server-terminating helpers such as ` + "`os.Exit`" + `.
 
 ## Discovery Probe
 
@@ -67,12 +69,14 @@ return {
   publicTools: caps.tools.map(t => t.name),
   resources: caps.resources,
   wrappers: caps.scripting_api.uapi_wrappers,
+  osWrappers: caps.scripting_api.os_wrappers,
+  ioWrappers: caps.scripting_api.io_wrappers,
   constants: Object.keys(sys.constants().constants),
   uname: sys.uname()
 };
 ` + "```" + `
 
-Expected public tools: only ` + "`eval`" + `. Expected scripting object: ` + "`sys`" + `, with ` + "`uapi`" + ` as the same object.
+Expected public tools: only ` + "`eval`" + `. Expected scripting objects: ` + "`sys`" + `, with ` + "`uapi`" + ` as the same object, plus ` + "`os`" + ` and ` + "`io`" + ` standard-library wrappers.
 
 ## Result Model
 
@@ -88,7 +92,8 @@ Treat ` + "`ok:false`" + ` errno values as observations during probing rather th
 
 Helpers that create FDs, buffers, and mappings return managed names. Reuse those names within later eval calls, and read ` + "`uapi://state`" + ` through MCP resources when you need a live inventory. Close what you create:
 
-- FDs: ` + "`sys.close({handle})`" + `.
+- FDs: ` + "`sys.close({handle})`" + ` or ` + "`os.fileClose({handle})`" + `.
+- Roots: ` + "`os.rootClose({root})`" + `.
 - Mappings: ` + "`sys.munmap({mapping})`" + `.
 - Buffers: ` + "`sys.bufferFree({name})`" + `.
 
@@ -132,13 +137,29 @@ return {ioctl, argp};
 ` + "```" + `
 
 Use ` + "`sys.constants({group: 'open_flags'})`" + `, ` + "`sys.constant('O_CLOEXEC')`" + `, and ` + "`sys.errno({name:'ENOENT'})`" + ` when constructing portable scripts.
+
+Go os/io file copy:
+
+` + "```javascript" + `
+os.writeFile({name: args.path, data_utf8: "hello", perm: "0600"});
+const src = os.open({name: args.path, handle: "copySrc"});
+const dst = os.create({name: args.copy, handle: "copyDst"});
+try {
+  const copied = io.copy({dst: {handle: "copyDst"}, src: {handle: "copySrc"}});
+  const got = os.readFile({name: args.copy, encoding: "utf8"});
+  return {copied, got};
+} finally {
+  os.fileClose({handle: "copySrc"});
+  os.fileClose({handle: "copyDst"});
+}
+` + "```" + `
 `
 }
 
 func apiReferenceMarkdown() string {
 	return `# Linux UAPI API Reference
 
-Agents should begin by reading MCP resources ` + "`uapi://agent-guide`" + `, ` + "`uapi://capabilities`" + `, and ` + "`uapi://scripting-api`" + ` through the MCP client resource API. The only public MCP tool is ` + "`eval`" + `; all Linux UAPI operations are available inside eval through the ` + "`sys`" + ` object, with ` + "`uapi`" + ` kept as an alias for older scripts. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
+Agents should begin by reading MCP resources ` + "`uapi://agent-guide`" + `, ` + "`uapi://capabilities`" + `, and ` + "`uapi://scripting-api`" + ` through the MCP client resource API. The only public MCP tool is ` + "`eval`" + `; all Linux UAPI operations are available inside eval through the ` + "`sys`" + ` object, with ` + "`uapi`" + ` kept as an alias for older scripts. Go standard-library style filesystem and stream workflows are available through the ` + "`os`" + ` and ` + "`io`" + ` globals. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
 
 MCP resources are not readable from JavaScript. Do not call ` + "`uapi.request('GET', 'uapi://capabilities')`" + `, ` + "`sys.request`" + `, or ` + "`fetch`" + ` inside eval. Use ` + "`sys.capabilities()`" + ` inside eval when a script needs the capability document.
 
@@ -152,6 +173,8 @@ Malformed script arguments, unknown handles, oversized reads, and invalid buffer
 
 Successful syscall wrappers return ` + "`ok: true`" + ` plus syscall-specific fields. Prefer managed handles over raw FDs. Raw integer FDs require ` + "`--allow-raw-fd`" + `.
 
+Go ` + "`os`" + `/` + "`io`" + ` wrappers also return ` + "`ok: true`" + ` on success. Package errors return ` + "`ok: false`" + ` with ` + "`error`" + `, ` + "`error_type`" + `, and where available ` + "`error_name`" + `, ` + "`path`" + `, ` + "`op`" + `, ` + "`errno`" + `, and ` + "`errno_name`" + `.
+
 ## Core Workflows
 
 - Reconnaissance: ` + "`sys.uname()`" + `, ` + "`sys.stat()`" + `, ` + "`sys.statx()`" + `, ` + "`sys.readlink()`" + `, ` + "`sys.open()`" + `, ` + "`sys.read()`" + `, and ` + "`sys.close()`" + `.
@@ -161,6 +184,7 @@ Successful syscall wrappers return ` + "`ok: true`" + ` plus syscall-specific fi
 - ptrace memory reads: ` + "`sys.ptraceAttach()`" + ` with wait enabled, ` + "`sys.ptraceRead()`" + ` bounded ranges, then ` + "`sys.ptraceDetach()`" + `.
 - mmap experiments: ` + "`sys.mmap()`" + ` anonymous or file-backed memory, mutate with ` + "`sys.memWrite()`" + `, inspect with ` + "`sys.memRead()`" + `, and clean up with ` + "`sys.munmap()`" + `.
 - Event and metadata helpers: ` + "`sys.eventfd()`" + `, ` + "`sys.memfdCreate()`" + `, ` + "`sys.inotifyInit1()`" + `, ` + "`sys.getxattr()`" + `, ` + "`sys.setxattr()`" + `, ` + "`sys.sendfile()`" + `, and ` + "`sys.copyFileRange()`" + `.
+- Go os/io workflows: ` + "`os.readFile()`" + `, ` + "`os.writeFile()`" + `, ` + "`os.open()`" + `, ` + "`os.openFile()`" + `, ` + "`os.openRoot()`" + `, ` + "`os.rootReadFile()`" + `, ` + "`os.fileRead()`" + `, ` + "`os.fileWrite()`" + `, ` + "`io.copy()`" + `, ` + "`io.copyN()`" + `, ` + "`io.readAll()`" + `, ` + "`io.readFull()`" + `, and ` + "`io.writeString()`" + `.
 
 ## Safety Notes
 
@@ -193,8 +217,10 @@ Globals:
 - ` + "`console`" + ` and ` + "`print`" + `: captured logging.
 - ` + "`sys`" + `: synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers.
 - ` + "`uapi`" + `: alias for ` + "`sys`" + ` for compatibility with older scripts.
+- ` + "`os`" + `: synchronous Go package os style wrappers for files, dirs, env, roots, processes, and File methods over managed handles.
+- ` + "`io`" + `: synchronous Go package io style copy/read/write helpers over managed handle, buffer, path, data, and discard endpoints.
 
-Not globals: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, or Node.js modules. Resource reading happens at the MCP client layer, not inside eval.
+Not globals: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, Node.js modules, or server-terminating helpers such as ` + "`os.Exit`" + `. Resource reading happens at the MCP client layer, not inside eval.
 
 Safe bootstrap:
 
@@ -203,6 +229,8 @@ const caps = sys.capabilities();
 return {
   name: caps.name,
   wrappers: caps.scripting_api.uapi_wrappers,
+  osWrappers: caps.scripting_api.os_wrappers,
+  ioWrappers: caps.scripting_api.io_wrappers,
   uname: sys.uname(),
   openFlags: sys.constants({group: "open_flags"}).constants
 };
@@ -231,5 +259,7 @@ return stat;
 ` + "```" + `
 
 Legacy wrappers such as ` + "`sys.open()`" + ` and ` + "`sys.socketpair()`" + ` accept the same JSON shape they used before. New script-only wrappers follow the lower camel-case form of their ` + "`golang.org/x/sys/unix`" + ` names where possible, such as ` + "`sys.fstatat()`" + `, ` + "`sys.memfdCreate()`" + `, and ` + "`sys.copyFileRange()`" + `. Syscall errno results are returned as normal data, so scripts should check ` + "`result.ok === false`" + ` when exploring expected failure cases.
+
+The ` + "`os`" + ` and ` + "`io`" + ` objects expose lower camel-case names such as ` + "`os.readFile()`" + ` and ` + "`io.copy()`" + ` plus Go-style aliases such as ` + "`os.ReadFile()`" + ` and ` + "`io.Copy()`" + `. File-returning helpers return managed FD handles. Use ` + "`os.fileClose({handle})`" + ` or ` + "`sys.close({handle})`" + ` to release them.
 `
 }

@@ -17,15 +17,16 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - Process control: `kill`, `wait4`, `prctl`, `ptrace` attach/detach/read/write/continue/syscall.
 - Extended attributes and transfer: get/list/set/remove xattr families, `sendfile`, and `copy_file_range`.
 - `ioctl`: integer argument or pointer to a managed buffer range.
-- `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*` wrappers, captured logs, timeout enforcement, and JSON results.
+- Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
+- `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, and `io.*` wrappers, captured logs, timeout enforcement, and JSON results.
 
-Agents should read MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, or `fetch`.
+Agents should read MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
 
 ## Safety Model
 
 This server intentionally exposes direct Linux syscalls. It can create files, open sockets, signal processes, attach to ptrace-allowed processes, mutate mappings, and issue arbitrary ioctls. Run it only in an isolated lab environment with a trusted MCP client.
 
-Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `sys.socket`, `sys.socketpair`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs.
+Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `os.open`, `os.create`, `os.openRoot`, `sys.socket`, `sys.socketpair`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs.
 
 Linux syscall failures are returned as structured data instead of MCP tool errors:
 
@@ -127,6 +128,18 @@ Attach to a permitted child process and read memory:
   "arguments": {
     "script": "const attach = sys.ptraceAttach({pid: args.pid, wait:true, timeout_ms:5000}); if (!attach.ok) return attach; try { return sys.ptraceRead({pid: args.pid, address: args.address, length:64, encoding:'hex'}); } finally { sys.ptraceDetach({pid: args.pid}); }",
     "args": {"pid": 1234, "address": "0x7ffd00000000"}
+  }
+}
+```
+
+Copy a file with the Go `os` and `io` scripting globals:
+
+```json
+{
+  "name": "eval",
+  "arguments": {
+    "script": "os.writeFile({name: args.path, data_utf8:'hello', perm:'0600'}); const src = os.open({name: args.path, handle:'src'}); const dst = os.create({name: args.copy, handle:'dst'}); try { const copied = io.copy({dst:{handle:'dst'}, src:{handle:'src'}}); const got = os.readFile({name: args.copy, encoding:'utf8'}); return {copied, got}; } finally { os.fileClose({handle:'src'}); os.fileClose({handle:'dst'}); }",
+    "args": {"path": "/tmp/mcp-uapi-src.txt", "copy": "/tmp/mcp-uapi-copy.txt"}
   }
 }
 ```

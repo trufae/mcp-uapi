@@ -20,8 +20,10 @@ Globals:
 - `console.log/info/warn/error` and `print`: captured logs.
 - `sys`: synchronous Linux `golang.org/x/sys/unix` scripting API plus managed handle helpers.
 - `uapi`: alias for `sys` for compatibility with older scripts.
+- `os`: synchronous Go package `os` style wrappers for files, directories, env, roots, processes, and File methods over managed handles.
+- `io`: synchronous Go package `io` style copy/read/write helpers over managed handle, buffer, path, data, and discard endpoints.
 
-Not globals: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, or Node.js modules. Inside eval, use `sys.capabilities()` for the same machine-readable capability data that is served as `uapi://capabilities`.
+Not globals: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, Node.js modules, or server-terminating helpers such as `os.Exit`. Inside eval, use `sys.capabilities()` for the same machine-readable capability data that is served as `uapi://capabilities`.
 
 Safe discovery probe:
 
@@ -29,6 +31,8 @@ Safe discovery probe:
 const caps = sys.capabilities();
 return {
   wrappers: caps.scripting_api.uapi_wrappers,
+  osWrappers: caps.scripting_api.os_wrappers,
+  ioWrappers: caps.scripting_api.io_wrappers,
   uname: sys.uname(),
   openFlags: sys.constants({group: "open_flags"}).constants,
   atConstants: sys.constants({group: "at"}).constants
@@ -36,6 +40,8 @@ return {
 ```
 
 Every syscall-style helper returns `ok: true` on success. Linux errno failures are structured observations with `ok: false`, `errno`, `errno_name`, and `error`; malformed arguments throw eval errors.
+
+Go `os`/`io` helpers also return `ok: true` on success. Package errors return `ok: false` with `error`, `error_type`, and when available `error_name`, `op`, `path`, `errno`, and `errno_name`.
 
 Common script groups:
 
@@ -45,6 +51,8 @@ Common script groups:
 - Buffers and mappings: `sys.bufferAlloc`, `sys.bufferWrite`, `sys.bufferRead`, `sys.bufferInfo`, `sys.bufferFree`, `sys.mmap`, `sys.munmap`, `sys.mprotect`, `sys.msync`, `sys.madvise`, `sys.memRead`, `sys.memWrite`.
 - Networking and readiness: `sys.socket`, `sys.socketpair`, `sys.bind`, `sys.connect`, `sys.listen`, `sys.accept`, `sys.sendto`, `sys.recvfrom`, `sys.getsockname`, `sys.getpeername`, `sys.setsockoptInt`, `sys.getsockoptInt`, `sys.shutdown`, `sys.poll`, `sys.epollCreate`, `sys.epollCtl`, `sys.epollWait`, `sys.eventfd`, `sys.inotifyInit1`, `sys.inotifyAddWatch`, `sys.inotifyRmWatch`.
 - Process, xattr, and transfer: `sys.kill`, `sys.wait4`, `sys.prctl`, `sys.ptraceAttach`, `sys.ptraceDetach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.getrusage`, `sys.getxattr`, `sys.listxattr`, `sys.setxattr`, `sys.removexattr`, `sys.memfdCreate`, `sys.sendfile`, `sys.copyFileRange`.
+- Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, `os.getenv`, `os.setenv`, `os.getwd`, `os.readDir`, `os.stat`, `os.findProcess`, `os.startProcess`.
+- Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, `io.pipe`.
 
 Socketpair example:
 
@@ -67,4 +75,20 @@ sys.fsync({handle: file.handle});
 const stat = sys.fstatat({path: args.path});
 sys.close({handle: file.handle});
 return stat;
+```
+
+Go os/io file copy example:
+
+```javascript
+os.writeFile({name: args.path, data_utf8: "hello", perm: "0600"});
+const src = os.open({name: args.path, handle: "copySrc"});
+const dst = os.create({name: args.copy, handle: "copyDst"});
+try {
+  const copied = io.copy({dst: {handle: "copyDst"}, src: {handle: "copySrc"}});
+  const got = os.readFile({name: args.copy, encoding: "utf8"});
+  return {copied, got};
+} finally {
+  os.fileClose({handle: "copySrc"});
+  os.fileClose({handle: "copyDst"});
+}
 ```

@@ -1,6 +1,6 @@
 # Examples
 
-Read MCP resources such as `uapi://agent-guide` and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`; helpers such as `uapi.request`, `sys.request`, and `fetch` are not available.
+Read MCP resources such as `uapi://agent-guide` and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`, `os.*`, and `io.*`; helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, and `import` are not available.
 
 ## Read A File
 
@@ -64,4 +64,20 @@ const xattr = sys.getxattr({path, name: "user.mcp_uapi", encoding: "utf8"});
 const statx = sys.statx({path, mask: "STATX_BASIC_STATS"});
 sys.close({handle: "target"});
 return {fd, xattr, statx};
+```
+
+## Go os/io File Copy
+
+```javascript
+os.writeFile({name: args.path, data_utf8: "hello from os", perm: "0600"});
+const src = os.open({name: args.path, handle: "src"});
+const dst = os.create({name: args.copy, handle: "dst"});
+try {
+  const copied = io.copy({dst: {handle: "dst"}, src: {handle: "src"}});
+  const got = os.readFile({name: args.copy, encoding: "utf8"});
+  return {copied, got};
+} finally {
+  os.fileClose({handle: "src"});
+  os.fileClose({handle: "dst"});
+}
 ```
