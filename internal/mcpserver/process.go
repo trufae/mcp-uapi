@@ -252,8 +252,8 @@ func waitStatusInfo(status unix.WaitStatus) map[string]any {
 
 func rusageInfo(rusage unix.Rusage) map[string]any {
 	return map[string]any{
-		"utime_usec": rusage.Utime.Sec*1_000_000 + int64(rusage.Utime.Usec),
-		"stime_usec": rusage.Stime.Sec*1_000_000 + int64(rusage.Stime.Usec),
+		"utime_usec": int64(rusage.Utime.Sec)*1_000_000 + int64(rusage.Utime.Usec),
+		"stime_usec": int64(rusage.Stime.Sec)*1_000_000 + int64(rusage.Stime.Usec),
 		"maxrss":     rusage.Maxrss,
 		"minflt":     rusage.Minflt,
 		"majflt":     rusage.Majflt,
