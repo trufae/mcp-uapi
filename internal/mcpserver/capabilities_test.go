@@ -3,6 +3,9 @@ package mcpserver
 import (
 	"strings"
 	"testing"
+
+	mcpclient "github.com/mark3labs/mcp-go/client"
+	"github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
@@ -18,6 +21,20 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	}
 	if !containsString(doc.Resources, "uapi://agent-guide") {
 		t.Fatalf("capabilities missing agent guide resource: %#v", doc.Resources)
+	}
+	for _, uri := range []string{"uapi://docs", "uapi://docs/index.json", "uapi://examples", "uapi://examples/index.json", "uapi://examples/001-network-interfaces-ioctl.js"} {
+		if !containsString(doc.Resources, uri) {
+			t.Fatalf("capabilities missing resource %s: %#v", uri, doc.Resources)
+		}
+	}
+	if doc.ClientBootstrap.DocsIndexResource != "uapi://docs" || doc.ClientBootstrap.ExamplesIndexResource != "uapi://examples" {
+		t.Fatalf("unexpected docs/examples bootstrap resources: %#v", doc.ClientBootstrap)
+	}
+	if len(doc.Documentation) == 0 || len(doc.ExampleScripts) == 0 {
+		t.Fatalf("capabilities should include documentation and example script inventories: %#v %#v", doc.Documentation, doc.ExampleScripts)
+	}
+	if doc.ExampleScripts[0].Name != "network_interfaces_ioctl" || doc.ExampleScripts[0].URI != "uapi://examples/001-network-interfaces-ioctl.js" || doc.ExampleScripts[0].Script != "" {
+		t.Fatalf("unexpected first example summary: %#v", doc.ExampleScripts[0])
 	}
 	if !strings.Contains(doc.ClientBootstrap.ResourceAccess, "no uapi.request") {
 		t.Fatalf("resource access guidance should reject uapi.request: %q", doc.ClientBootstrap.ResourceAccess)
@@ -61,6 +78,107 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 		if _, ok := doc.Constants[group]; !ok {
 			t.Fatalf("capabilities missing %s constants", group)
 		}
+	}
+}
+
+func TestEmbeddedDocsAndExamples(t *testing.T) {
+	if !strings.Contains(agentGuideMarkdown(), "uapi://examples") {
+		t.Fatalf("agent guide should mention embedded examples")
+	}
+	if !strings.Contains(apiReferenceMarkdown(), "# API Reference") {
+		t.Fatalf("api reference should come from docs/API.md")
+	}
+	if !strings.Contains(scriptingAPIMarkdown(), "# Scripting API") {
+		t.Fatalf("scripting API should come from docs/SCRIPTING.md")
+	}
+
+	examples := exampleScripts()
+	if len(examples) == 0 {
+		t.Fatalf("expected embedded example scripts")
+	}
+	first := examples[0]
+	if first.Name != "network_interfaces_ioctl" || first.URI != "uapi://examples/001-network-interfaces-ioctl.js" {
+		t.Fatalf("unexpected first example: %#v", first)
+	}
+	if !strings.Contains(first.Script, "SIOCGIFINDEX") || !strings.Contains(first.Script, "sys.ioctl") {
+		t.Fatalf("network ioctl example missing expected ioctl code")
+	}
+	if !strings.Contains(examplesIndexMarkdown(), first.URI) {
+		t.Fatalf("examples index should list first example")
+	}
+	if !strings.Contains(docsIndexMarkdown(), "uapi://api-reference") {
+		t.Fatalf("docs index should list API reference")
+	}
+}
+
+func TestEmbeddedNetworkInterfaceExampleExecutes(t *testing.T) {
+	app, _ := New(Config{})
+	defer app.Close()
+
+	first := exampleScripts()[0]
+	resp, result := callEvalForTest(t, app, map[string]any{"script": first.Script, "timeout_ms": 5000})
+	if result.IsError || !resp.OK {
+		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
+	}
+	interfaces, ok := resp.Result.([]any)
+	if !ok || len(interfaces) == 0 {
+		t.Fatalf("expected interface list, got %#v", resp.Result)
+	}
+	iface, ok := interfaces[0].(map[string]any)
+	if !ok || iface["name"] == "" {
+		t.Fatalf("unexpected first interface entry: %#v", interfaces[0])
+	}
+}
+
+func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
+	app, srv := New(Config{})
+	defer app.Close()
+
+	client, err := mcpclient.NewInProcessClient(srv)
+	if err != nil {
+		t.Fatalf("new in-process client: %v", err)
+	}
+	defer client.Close()
+
+	if err := client.Start(t.Context()); err != nil {
+		t.Fatalf("start client: %v", err)
+	}
+	initRequest := mcp.InitializeRequest{}
+	initRequest.Params.ProtocolVersion = mcp.LATEST_PROTOCOL_VERSION
+	initRequest.Params.ClientInfo = mcp.Implementation{Name: "mcp-uapi-test", Version: "1.0.0"}
+	if _, err := client.Initialize(t.Context(), initRequest); err != nil {
+		t.Fatalf("initialize client: %v", err)
+	}
+
+	listed, err := client.ListResources(t.Context(), mcp.ListResourcesRequest{})
+	if err != nil {
+		t.Fatalf("list resources: %v", err)
+	}
+	resourceURIs := make([]string, 0, len(listed.Resources))
+	for _, resource := range listed.Resources {
+		resourceURIs = append(resourceURIs, resource.URI)
+	}
+	for _, uri := range []string{"uapi://docs", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
+		if !containsString(resourceURIs, uri) {
+			t.Fatalf("listed resources missing %s: %#v", uri, resourceURIs)
+		}
+	}
+
+	readRequest := mcp.ReadResourceRequest{}
+	readRequest.Params.URI = "uapi://examples/001-network-interfaces-ioctl.js"
+	read, err := client.ReadResource(t.Context(), readRequest)
+	if err != nil {
+		t.Fatalf("read example resource: %v", err)
+	}
+	if len(read.Contents) != 1 {
+		t.Fatalf("example resource contents = %d", len(read.Contents))
+	}
+	text, ok := read.Contents[0].(mcp.TextResourceContents)
+	if !ok {
+		t.Fatalf("example resource content type = %T", read.Contents[0])
+	}
+	if text.MIMEType != mimeJavaScript || !strings.Contains(text.Text, "SIOCGIFINDEX") {
+		t.Fatalf("unexpected example resource contents: %#v", text)
 	}
 }
 

@@ -4,6 +4,8 @@
 
 Before eval, agents should read MCP resources `uapi://agent-guide`, `uapi://scripting-api`, `uapi://api-reference`, and `uapi://capabilities` through the MCP client resource API. Those resources are not JavaScript URLs. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval.
 
+Reusable scripts live as individual files in `examples/`, are embedded into the binary at build time, and are exposed as `uapi://examples/<file>.js`. Read `uapi://examples` for a human-readable index or `uapi://examples/index.json` for metadata before choosing a script.
+
 ```json
 {
   "script": "const caps = sys.capabilities(); return {name: caps.name, uname: sys.uname()};",

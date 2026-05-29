@@ -22,6 +22,8 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 
 Agents should read MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
 
+The documentation resources are backed by the markdown files in `docs/` and embedded into the binary at build time. Reusable eval scripts are backed by individual files in `examples/`, also embedded at build time, and exposed under `uapi://examples/<file>.js`. Start with `uapi://docs` and `uapi://examples` for the resource indexes.
+
 ## Safety Model
 
 This server intentionally exposes direct Linux syscalls. It can create files, open sockets, signal processes, attach to ptrace-allowed processes, mutate mappings, and issue arbitrary ioctls. Run it only in an isolated lab environment with a trusted MCP client.
@@ -150,3 +152,7 @@ Copy a file with the Go `os` and `io` scripting globals:
 - [docs/SCRIPTING.md](docs/SCRIPTING.md): Goja `eval` globals, wrappers, and examples.
 - [docs/EXAMPLES.md](docs/EXAMPLES.md): concrete eval workflows.
 - [docs/SECURITY.md](docs/SECURITY.md): safety model and deployment guidance.
+
+## Reusable Scripts
+
+- [examples/001-network-interfaces-ioctl.js](examples/001-network-interfaces-ioctl.js): enumerate Linux network interfaces with `struct ifreq` and `SIOCGIF*` ioctls.

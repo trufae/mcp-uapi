@@ -96,7 +96,7 @@ func New(config Config) (*App, *server.MCPServer) {
 }
 
 func serverInstructions() string {
-	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, and uapi://capabilities using the MCP client resource-read operation. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, xattrs, eventfd/inotify, process helpers, and ioctl. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, and sys.eventfd; raw integer FDs require --allow-raw-fd."
+	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and reusable eval scripts from examples/*.js at build time. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, xattrs, eventfd/inotify, process helpers, and ioctl. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, and sys.eventfd; raw integer FDs require --allow-raw-fd."
 }
 
 func (a *App) Close() {
@@ -124,21 +124,36 @@ func (a *App) Close() {
 }
 
 func (a *App) registerResources(srv *server.MCPServer) {
-	srv.AddResource(mcp.NewResource("uapi://agent-guide", "Linux UAPI agent guide", mcp.WithResourceDescription("Curated bootstrap guide for agents: resource reading, eval shape, runtime globals, and common workflow patterns."), mcp.WithMIMEType("text/markdown")), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: agentGuideMarkdown()}}, nil
+	for _, resource := range documentResources() {
+		resource := resource
+		srv.AddResource(mcp.NewResource(resource.URI, resource.Name, mcp.WithResourceDescription(resource.Description), mcp.WithMIMEType(resource.MIMEType)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: resource.MIMEType, Text: mustEmbeddedText(resource.Path)}}, nil
+		})
+	}
+	srv.AddResource(mcp.NewResource("uapi://docs", "MCP-UAPI documentation index", mcp.WithResourceDescription("Human-readable index of embedded documentation resources."), mcp.WithMIMEType(mimeMarkdown)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: mimeMarkdown, Text: docsIndexMarkdown()}}, nil
 	})
+	srv.AddResource(mcp.NewResource("uapi://docs/index.json", "MCP-UAPI documentation index JSON", mcp.WithResourceDescription("Machine-readable index of embedded documentation resources."), mcp.WithMIMEType(mimeJSON)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: mimeJSON, Text: docsIndexJSON()}}, nil
+	})
+	srv.AddResource(mcp.NewResource("uapi://examples", "MCP-UAPI example scripts", mcp.WithResourceDescription("Human-readable index of reusable eval scripts embedded from examples/*.js."), mcp.WithMIMEType(mimeMarkdown)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: mimeMarkdown, Text: examplesIndexMarkdown()}}, nil
+	})
+	srv.AddResource(mcp.NewResource("uapi://examples/index.json", "MCP-UAPI example script index JSON", mcp.WithResourceDescription("Machine-readable index of reusable eval scripts embedded from examples/*.js."), mcp.WithMIMEType(mimeJSON)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: mimeJSON, Text: examplesIndexJSON()}}, nil
+	})
+	for _, resource := range exampleScriptResources() {
+		resource := resource
+		srv.AddResource(mcp.NewResource(resource.URI, resource.Name, mcp.WithResourceDescription(resource.Description), mcp.WithMIMEType(resource.MIMEType)), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
+			return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: resource.MIMEType, Text: mustEmbeddedText(resource.Path)}}, nil
+		})
+	}
 	srv.AddResource(mcp.NewResource("uapi://capabilities", "Linux UAPI capabilities", mcp.WithResourceDescription("Machine-readable primitive inventory, constants, tool summaries, and scripting metadata."), mcp.WithMIMEType("application/json")), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		data, err := json.MarshalIndent(Capabilities(), "", "  ")
 		if err != nil {
 			return nil, err
 		}
 		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "application/json", Text: string(data)}}, nil
-	})
-	srv.AddResource(mcp.NewResource("uapi://api-reference", "Linux UAPI API reference", mcp.WithResourceDescription("Eval scripting reference and workflow notes for Linux user-mode API exploration."), mcp.WithMIMEType("text/markdown")), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: apiReferenceMarkdown()}}, nil
-	})
-	srv.AddResource(mcp.NewResource("uapi://scripting-api", "Linux UAPI scripting API", mcp.WithResourceDescription("JavaScript eval API reference and examples."), mcp.WithMIMEType("text/markdown")), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
-		return []mcp.ResourceContents{mcp.TextResourceContents{URI: request.Params.URI, MIMEType: "text/markdown", Text: scriptingAPIMarkdown()}}, nil
 	})
 	srv.AddResource(mcp.NewResource("uapi://state", "Linux UAPI live state", mcp.WithResourceDescription("Current managed FDs, buffers, and mmap regions."), mcp.WithMIMEType("application/json")), func(ctx context.Context, request mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		data, err := json.MarshalIndent(a.stateSnapshot(), "", "  ")

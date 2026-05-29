@@ -2,6 +2,10 @@
 
 Start by reading MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` with the MCP client resource-read operation. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, mappings, roots, and processes inside the JavaScript `sys`/`uapi`, `os`, and `io` scripting APIs so agents do not need to juggle raw integer FDs.
 
+Documentation resources are backed by the files in `docs/` and embedded into the binary at build time. Use `uapi://docs` for the human-readable documentation index, `uapi://docs/index.json` for the machine-readable index, and the stable aliases `uapi://agent-guide`, `uapi://api-reference`, `uapi://scripting-api`, `uapi://examples-guide`, and `uapi://security` for specific documents.
+
+Reusable eval scripts are backed by individual files in `examples/` and embedded at build time. Use `uapi://examples` for the script index, `uapi://examples/index.json` for metadata, and `uapi://examples/<file>.js` for the script text to pass to `eval`.
+
 MCP resources are documentation and discovery surfaces outside the eval runtime. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval. Use `sys.capabilities()` inside eval when a script needs the machine-readable capability document.
 
 Correct eval tool envelope:
