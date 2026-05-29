@@ -54,7 +54,7 @@ Managed handles are returned by script helpers that create resources. Use `handl
 - Memory: `sys.mmap`, `sys.memWrite`, `sys.memRead`, `sys.mprotect`, `sys.msync`, `sys.madvise`, `sys.munmap`.
 - Network: `sys.socket`, `sys.socketpair`, `sys.bind`, `sys.connect`, `sys.listen`, `sys.accept`, `sys.sendto`, `sys.recvfrom`, `sys.getsockname`, `sys.getpeername`, `sys.setsockoptInt`, `sys.getsockoptInt`, `sys.shutdown`.
 - Readiness and event sources: `sys.poll`, `sys.epollCreate`, `sys.epollCtl`, `sys.epollWait`, `sys.eventfd`, `sys.timerfdCreate`, `sys.timerfdGettime`, `sys.timerfdSettime`, `sys.inotifyInit`, `sys.inotifyInit1`, `sys.inotifyAddWatch`, `sys.inotifyRmWatch`, `sys.memfdCreate`.
-- Process and resources: `sys.kill`, `sys.tgkill`, `sys.wait4`, `sys.prctl`, `sys.prctlRetInt`, `sys.pidfdOpen`, `sys.pidfdGetfd`, `sys.pidfdSendSignal`, `sys.ptraceAttach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceDetach`, `sys.getpgid`, `sys.getpgrp`, `sys.getsid`, `sys.setpgid`, `sys.setsid`, `sys.getpriority`, `sys.setpriority`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.prlimit`, `sys.getrusage`, `sys.clockGettime`, `sys.clockGetres`, `sys.gettimeofday`, `sys.nanosleep`, `sys.getrandom`, `sys.sysinfo`.
+- Process and resources: `sys.kill`, `sys.tgkill`, `sys.wait4`, `sys.prctl`, `sys.prctlRetInt`, `sys.pidfdOpen`, `sys.pidfdGetfd`, `sys.pidfdSendSignal`, `sys.ptraceAttach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceGetRegs`, `sys.ptraceSetOptions`, `sys.ptraceDetach`, `sys.getpgid`, `sys.getpgrp`, `sys.getsid`, `sys.setpgid`, `sys.setsid`, `sys.getpriority`, `sys.setpriority`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.prlimit`, `sys.getrusage`, `sys.clockGettime`, `sys.clockGetres`, `sys.gettimeofday`, `sys.nanosleep`, `sys.getrandom`, `sys.sysinfo`.
 - Extended attributes and transfer: `sys.getxattr`, `sys.lgetxattr`, `sys.fgetxattr`, `sys.listxattr`, `sys.llistxattr`, `sys.flistxattr`, `sys.setxattr`, `sys.lsetxattr`, `sys.fsetxattr`, `sys.removexattr`, `sys.lremovexattr`, `sys.fremovexattr`, `sys.send`, `sys.sendmsg`, `sys.recvmsg`, `sys.sendfile`, `sys.copyFileRange`, `sys.splice`, `sys.tee`, `sys.vmsplice`, `sys.processVMReadv`, `sys.processVMWritev`.
 - Ioctl: `sys.ioctl` with `arg` or `buffer`/`buffer_offset`/`buffer_length`.
 - Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, env helpers, directory/stat helpers, and process helpers.
@@ -68,7 +68,8 @@ API-specific docs are available under `uapi://api`, including `uapi://api/sys-un
 
 1. Attach with `sys.ptraceAttach({pid, wait:true})`.
 2. Read or write bounded ranges with `sys.ptraceRead` and `sys.ptraceWrite`.
-3. Continue or syscall-step with `sys.ptraceCont` or `sys.ptraceSyscall` when needed.
-4. Detach with `sys.ptraceDetach`.
+3. For syscall tracing, set `PTRACE_O_TRACESYSGOOD` with `sys.ptraceSetOptions`, step with `sys.ptraceSyscall`, and inspect `sys.ptraceGetRegs`; normalized syscall metadata includes a build-time generated `name` when known.
+4. Continue with `sys.ptraceCont` when needed.
+5. Detach with `sys.ptraceDetach` from a ptrace-stop.
 
 Linux Yama and capability policy still applies. For non-child targets, the server process may need `CAP_SYS_PTRACE` or a permissive `ptrace_scope`.

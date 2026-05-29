@@ -16,7 +16,7 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - Memory mappings: anonymous and file-backed `mmap`, `munmap`, `mprotect`, `msync`, `madvise`, mapping read/write.
 - Networking: socket, socketpair, bind/connect/listen/accept, send/recv, socket names, integer sockopts, shutdown.
 - Readiness and events: `poll`, `epoll_create`, `epoll_ctl`, `epoll_wait`, `eventfd`, `inotify`, `memfd_create`, and close-range helpers.
-- Process control: `kill`, `wait4`, `prctl`, `ptrace` attach/detach/read/write/continue/syscall.
+- Process control: `kill`, `wait4`, `prctl`, `ptrace` attach/detach/read/write/continue/syscall/get-registers/set-options.
 - Extended attributes and transfer: get/list/set/remove xattr families, `sendfile`, and `copy_file_range`.
 - `ioctl`: integer argument or pointer to a managed buffer range.
 - Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
@@ -152,6 +152,14 @@ try {
 } finally {
   sys.ptraceDetach({pid: args.pid});
 }
+```
+
+Trace a few syscalls from an allowed process:
+
+```javascript
+const src = os.readFile({name: 'examples/006-strace-syscall-trace.js', encoding: 'utf8'});
+const run = new Function('args', 'console', 'print', 'sys', 'uapi', 'os', 'io', src.data_utf8);
+return run({pid: args.pid, max_events: 8, wait_timeout_ms: 1000}, console, print, sys, uapi, os, io);
 ```
 
 Copy a file with the `os` and `io` scripting globals:

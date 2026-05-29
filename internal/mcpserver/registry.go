@@ -127,6 +127,10 @@ func (a *App) handlerForTool(name string) server.ToolHandlerFunc {
 		return a.handlePtraceCont
 	case "uapi_ptrace_syscall":
 		return a.handlePtraceSyscall
+	case "uapi_ptrace_get_regs":
+		return a.handlePtraceGetRegs
+	case "uapi_ptrace_set_options":
+		return a.handlePtraceSetOptions
 	case "uapi_ioctl":
 		return a.handleIoctl
 	case "uapi_prctl":

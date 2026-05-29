@@ -4,6 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"reflect"
+	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -194,6 +197,198 @@ func (a *App) handlePtraceSyscall(ctx context.Context, request mcp.CallToolReque
 	}
 	err := unix.PtraceSyscall(args.PID, int(args.Signal))
 	return syscallResult(map[string]any{"pid": args.PID, "signal": int(args.Signal)}, err)
+}
+
+func (a *App) handlePtraceGetRegs(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ptracePIDArgs
+	if err := bind(request, &args); err != nil {
+		return toolError(err)
+	}
+	var regs unix.PtraceRegs
+	err := unix.PtraceGetRegs(args.PID, &regs)
+	fields := map[string]any{"pid": args.PID, "arch": runtime.GOARCH}
+	if err == nil {
+		raw, scalars, arrays := ptraceRegsInfo(regs)
+		fields["registers"] = raw
+		if syscallInfo := ptraceSyscallRegisterInfo(runtime.GOARCH, scalars, arrays); len(syscallInfo) != 0 {
+			fields["syscall"] = syscallInfo
+		}
+	}
+	return syscallResult(fields, err)
+}
+
+type ptraceOptionsArgs struct {
+	PID     int         `json:"pid"`
+	Options ConstUint64 `json:"options"`
+}
+
+func (a *App) handlePtraceSetOptions(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var args ptraceOptionsArgs
+	if err := bind(request, &args); err != nil {
+		return toolError(err)
+	}
+	err := unix.PtraceSetOptions(args.PID, int(args.Options))
+	return syscallResult(map[string]any{"pid": args.PID, "options": int(args.Options)}, err)
+}
+
+func ptraceRegsInfo(regs unix.PtraceRegs) (map[string]any, map[string]uint64, map[string][]uint64) {
+	value := reflect.ValueOf(regs)
+	typ := value.Type()
+	raw := map[string]any{}
+	scalars := map[string]uint64{}
+	arrays := map[string][]uint64{}
+	for i := 0; i < value.NumField(); i++ {
+		field := typ.Field(i)
+		if field.PkgPath != "" {
+			continue
+		}
+		key := normalizeRegisterName(field.Name)
+		fieldValue := value.Field(i)
+		switch fieldValue.Kind() {
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			v := fieldValue.Uint()
+			scalars[key] = v
+			raw[key] = hex64(v)
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			v := uint64(fieldValue.Int())
+			scalars[key] = v
+			raw[key] = hex64(v)
+		case reflect.Array:
+			items := make([]string, 0, fieldValue.Len())
+			values := make([]uint64, 0, fieldValue.Len())
+			for j := 0; j < fieldValue.Len(); j++ {
+				item := fieldValue.Index(j)
+				var v uint64
+				switch item.Kind() {
+				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+					v = item.Uint()
+				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+					v = uint64(item.Int())
+				default:
+					continue
+				}
+				values = append(values, v)
+				items = append(items, hex64(v))
+			}
+			arrays[key] = values
+			raw[key] = items
+		}
+	}
+	return raw, scalars, arrays
+}
+
+func normalizeRegisterName(name string) string {
+	return strings.ToLower(name)
+}
+
+func ptraceSyscallRegisterInfo(arch string, scalars map[string]uint64, arrays map[string][]uint64) map[string]any {
+	info := map[string]any{}
+	var nr uint64
+	var nrOK bool
+	var retval uint64
+	var retvalOK bool
+	var args []uint64
+	var pc, sp uint64
+	var pcOK, spOK bool
+
+	scalar := func(name string) (uint64, bool) { v, ok := scalars[name]; return v, ok }
+	array := func(name string, idx int) (uint64, bool) {
+		values, ok := arrays[name]
+		if !ok || idx < 0 || idx >= len(values) {
+			return 0, false
+		}
+		return values[idx], true
+	}
+
+	switch arch {
+	case "amd64":
+		nr, nrOK = scalar("orig_rax")
+		retval, retvalOK = scalar("rax")
+		args = registerArgs(scalars, "rdi", "rsi", "rdx", "r10", "r8", "r9")
+		pc, pcOK = scalar("rip")
+		sp, spOK = scalar("rsp")
+	case "386":
+		nr, nrOK = scalar("orig_eax")
+		retval, retvalOK = scalar("eax")
+		args = registerArgs(scalars, "ebx", "ecx", "edx", "esi", "edi", "ebp")
+		pc, pcOK = scalar("eip")
+		sp, spOK = scalar("esp")
+	case "arm64":
+		nr, nrOK = array("regs", 8)
+		retval, retvalOK = array("regs", 0)
+		for i := 0; i < 6; i++ {
+			if v, ok := array("regs", i); ok {
+				args = append(args, v)
+			}
+		}
+		pc, pcOK = scalar("pc")
+		sp, spOK = scalar("sp")
+	case "arm":
+		nr, nrOK = array("uregs", 7)
+		retval, retvalOK = array("uregs", 0)
+		for i := 0; i < 6; i++ {
+			if v, ok := array("uregs", i); ok {
+				args = append(args, v)
+			}
+		}
+		pc, pcOK = array("uregs", 15)
+		sp, spOK = array("uregs", 13)
+	case "riscv64":
+		nr, nrOK = scalar("a7")
+		retval, retvalOK = scalar("a0")
+		args = registerArgs(scalars, "a0", "a1", "a2", "a3", "a4", "a5")
+		pc, pcOK = scalar("pc")
+		sp, spOK = scalar("sp")
+	}
+
+	if nrOK {
+		info["nr"] = nr
+		info["nr_hex"] = hex64(nr)
+		if name, ok := linuxSyscallName(arch, nr); ok {
+			info["name"] = name
+		} else {
+			info["name"] = fmt.Sprintf("sys_%d", nr)
+		}
+	}
+	if retvalOK {
+		info["retval"] = hex64(retval)
+		info["retval_signed"] = fmt.Sprintf("%d", int64(retval))
+		if name, ok := negativeErrno(retval); ok {
+			info["retval_errno"] = name
+		}
+	}
+	if len(args) != 0 {
+		encoded := make([]string, 0, len(args))
+		for _, arg := range args {
+			encoded = append(encoded, hex64(arg))
+		}
+		info["args"] = encoded
+	}
+	if pcOK {
+		info["pc"] = hex64(pc)
+	}
+	if spOK {
+		info["sp"] = hex64(sp)
+	}
+	return info
+}
+
+func registerArgs(scalars map[string]uint64, names ...string) []uint64 {
+	args := make([]uint64, 0, len(names))
+	for _, name := range names {
+		if v, ok := scalars[name]; ok {
+			args = append(args, v)
+		}
+	}
+	return args
+}
+
+func negativeErrno(retval uint64) (string, bool) {
+	if retval < ^uint64(0)-4094 {
+		return "", false
+	}
+	errno := unix.Errno(-int64(retval))
+	return errnoName(errno), true
 }
 
 type prctlArgs struct {

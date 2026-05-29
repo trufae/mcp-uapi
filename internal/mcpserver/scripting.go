@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,11 +58,12 @@ type scriptLogSink struct {
 }
 
 type scriptEnv struct {
-	app  *App
-	ctx  context.Context
-	vm   *goja.Runtime
-	logs *scriptLogSink
-	ops  int
+	app            *App
+	ctx            context.Context
+	vm             *goja.Runtime
+	logs           *scriptLogSink
+	ops            int
+	lockedOSThread bool
 }
 
 func (a *App) handleEval(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -98,6 +100,7 @@ func (a *App) handleEval(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	vm.SetMaxCallStackSize(2048)
 	logs := &scriptLogSink{limit: int(logLimit)}
 	env := &scriptEnv{app: a, ctx: ctx, vm: vm, logs: logs}
+	defer env.unlockOSThread()
 
 	if err := vm.Set("args", jsonSafeValue(args.Args)); err != nil {
 		return toolError(err)
@@ -226,6 +229,9 @@ func (e *scriptEnv) callTool(toolName string, args any) (any, error) {
 	if handler == nil {
 		return nil, fmt.Errorf("tool %q is not available inside eval", toolName)
 	}
+	if isPtraceTool(toolName) {
+		e.lockOSThread()
+	}
 	e.ops++
 	request := mcp.CallToolRequest{Params: mcp.CallToolParams{Name: toolName, Arguments: jsonSafeValue(args)}}
 	result, err := handler(e.ctx, request)
@@ -249,62 +255,89 @@ func (e *scriptEnv) callTool(toolName string, args any) (any, error) {
 	return text, nil
 }
 
+func isPtraceTool(toolName string) bool {
+	switch toolName {
+	case "uapi_ptrace_attach", "uapi_ptrace_detach", "uapi_ptrace_read", "uapi_ptrace_write", "uapi_ptrace_cont", "uapi_ptrace_syscall", "uapi_ptrace_get_regs", "uapi_ptrace_set_options":
+		return true
+	default:
+		return false
+	}
+}
+
+func (e *scriptEnv) lockOSThread() {
+	if e.lockedOSThread {
+		return
+	}
+	runtime.LockOSThread()
+	e.lockedOSThread = true
+}
+
+func (e *scriptEnv) unlockOSThread() {
+	if !e.lockedOSThread {
+		return
+	}
+	runtime.UnlockOSThread()
+	e.lockedOSThread = false
+}
+
 func scriptToolAliases() map[string]string {
 	return map[string]string{
-		"capabilities":  "uapi_capabilities",
-		"constants":     "uapi_constants",
-		"errno":         "uapi_errno",
-		"uname":         "uapi_uname",
-		"getpid":        "uapi_getpid",
-		"open":          "uapi_open",
-		"close":         "uapi_close",
-		"read":          "uapi_read",
-		"write":         "uapi_write",
-		"pread":         "uapi_pread",
-		"pwrite":        "uapi_pwrite",
-		"lseek":         "uapi_lseek",
-		"fstat":         "uapi_fstat",
-		"stat":          "uapi_stat",
-		"readlink":      "uapi_readlink",
-		"bufferAlloc":   "uapi_buffer_alloc",
-		"bufferFree":    "uapi_buffer_free",
-		"bufferInfo":    "uapi_buffer_info",
-		"bufferWrite":   "uapi_buffer_write",
-		"bufferRead":    "uapi_buffer_read",
-		"mmap":          "uapi_mmap",
-		"munmap":        "uapi_munmap",
-		"mprotect":      "uapi_mprotect",
-		"msync":         "uapi_msync",
-		"madvise":       "uapi_madvise",
-		"memRead":       "uapi_mem_read",
-		"memWrite":      "uapi_mem_write",
-		"socket":        "uapi_socket",
-		"socketpair":    "uapi_socketpair",
-		"bind":          "uapi_bind",
-		"connect":       "uapi_connect",
-		"listen":        "uapi_listen",
-		"accept":        "uapi_accept",
-		"sendto":        "uapi_sendto",
-		"recvfrom":      "uapi_recvfrom",
-		"getsockname":   "uapi_getsockname",
-		"getpeername":   "uapi_getpeername",
-		"setsockoptInt": "uapi_setsockopt_int",
-		"getsockoptInt": "uapi_getsockopt_int",
-		"shutdown":      "uapi_shutdown",
-		"poll":          "uapi_poll",
-		"epollCreate":   "uapi_epoll_create",
-		"epollCtl":      "uapi_epoll_ctl",
-		"epollWait":     "uapi_epoll_wait",
-		"kill":          "uapi_kill",
-		"wait4":         "uapi_wait4",
-		"ptraceAttach":  "uapi_ptrace_attach",
-		"ptraceDetach":  "uapi_ptrace_detach",
-		"ptraceRead":    "uapi_ptrace_read",
-		"ptraceWrite":   "uapi_ptrace_write",
-		"ptraceCont":    "uapi_ptrace_cont",
-		"ptraceSyscall": "uapi_ptrace_syscall",
-		"ioctl":         "uapi_ioctl",
-		"prctl":         "uapi_prctl",
+		"capabilities":     "uapi_capabilities",
+		"constants":        "uapi_constants",
+		"errno":            "uapi_errno",
+		"uname":            "uapi_uname",
+		"getpid":           "uapi_getpid",
+		"open":             "uapi_open",
+		"close":            "uapi_close",
+		"read":             "uapi_read",
+		"write":            "uapi_write",
+		"pread":            "uapi_pread",
+		"pwrite":           "uapi_pwrite",
+		"lseek":            "uapi_lseek",
+		"fstat":            "uapi_fstat",
+		"stat":             "uapi_stat",
+		"readlink":         "uapi_readlink",
+		"bufferAlloc":      "uapi_buffer_alloc",
+		"bufferFree":       "uapi_buffer_free",
+		"bufferInfo":       "uapi_buffer_info",
+		"bufferWrite":      "uapi_buffer_write",
+		"bufferRead":       "uapi_buffer_read",
+		"mmap":             "uapi_mmap",
+		"munmap":           "uapi_munmap",
+		"mprotect":         "uapi_mprotect",
+		"msync":            "uapi_msync",
+		"madvise":          "uapi_madvise",
+		"memRead":          "uapi_mem_read",
+		"memWrite":         "uapi_mem_write",
+		"socket":           "uapi_socket",
+		"socketpair":       "uapi_socketpair",
+		"bind":             "uapi_bind",
+		"connect":          "uapi_connect",
+		"listen":           "uapi_listen",
+		"accept":           "uapi_accept",
+		"sendto":           "uapi_sendto",
+		"recvfrom":         "uapi_recvfrom",
+		"getsockname":      "uapi_getsockname",
+		"getpeername":      "uapi_getpeername",
+		"setsockoptInt":    "uapi_setsockopt_int",
+		"getsockoptInt":    "uapi_getsockopt_int",
+		"shutdown":         "uapi_shutdown",
+		"poll":             "uapi_poll",
+		"epollCreate":      "uapi_epoll_create",
+		"epollCtl":         "uapi_epoll_ctl",
+		"epollWait":        "uapi_epoll_wait",
+		"kill":             "uapi_kill",
+		"wait4":            "uapi_wait4",
+		"ptraceAttach":     "uapi_ptrace_attach",
+		"ptraceDetach":     "uapi_ptrace_detach",
+		"ptraceRead":       "uapi_ptrace_read",
+		"ptraceWrite":      "uapi_ptrace_write",
+		"ptraceCont":       "uapi_ptrace_cont",
+		"ptraceSyscall":    "uapi_ptrace_syscall",
+		"ptraceGetRegs":    "uapi_ptrace_get_regs",
+		"ptraceSetOptions": "uapi_ptrace_set_options",
+		"ioctl":            "uapi_ioctl",
+		"prctl":            "uapi_prctl",
 	}
 }
 

@@ -308,6 +308,13 @@ const schemaPtraceSignal = `{
   "required":["pid"]
 }`
 
+const schemaPtraceOptions = `{
+  "type":"object",
+  "additionalProperties":false,
+  "properties":{"pid":{"type":"integer"},"options":{"type":["integer","string"],"default":0}},
+  "required":["pid","options"]
+}`
+
 const schemaIoctl = `{
   "type":"object",
   "additionalProperties":false,

@@ -195,7 +195,7 @@ func (a *App) registerPrompts(srv *server.MCPServer) {
 	})
 	srv.AddPrompt(mcp.NewPrompt("uapi_ptrace_memory_probe", mcp.WithPromptDescription("Use eval ptrace helpers to attach to a process and read memory safely."), mcp.WithArgument("pid", mcp.ArgumentDescription("Target PID and any known address/range context."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		pid := request.Params.Arguments["pid"]
-		text := "Read MCP resources uapi://agent-guide and uapi://scripting-api first. In eval, attach with sys.ptraceAttach({pid, wait:true}), confirm the SIGSTOP with sys.wait4 if needed, read small bounded ranges with sys.ptraceRead({pid,address,length,encoding:'hex'}), then always detach with sys.ptraceDetach. Keep addresses as hex strings."
+		text := "Read MCP resources uapi://agent-guide and uapi://scripting-api first. In eval, ptrace helpers pin the OS thread automatically. Attach with sys.ptraceAttach({pid, wait:true}), optionally call sys.ptraceSetOptions({pid, options:'PTRACE_O_TRACESYSGOOD'}), use sys.ptraceGetRegs({pid}) or bounded sys.ptraceRead({pid,address,length,encoding:'hex'}), then always detach with sys.ptraceDetach. Keep addresses as hex strings."
 		if pid != "" {
 			text += "\n\nPID/address context:\n" + pid
 		}

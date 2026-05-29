@@ -2,6 +2,8 @@
 
 This resource covers `processVMReadv`, `processVMWritev`, and the ptrace helpers. These wrappers are useful for child-process instrumentation, controlled debugging, and memory proof-of-concept work. Kernel ptrace/Yama policy still applies.
 
+Inside eval, ptrace helpers automatically pin the eval goroutine to a single OS thread until the script returns. Keep multi-step ptrace flows in one eval call so Linux sees a consistent tracer task.
+
 ## processVMReadv
 
 Simple form:
@@ -62,12 +64,16 @@ Use ptrace when the target must be stopped, stepped, or modified through ptrace 
 const attach = sys.ptraceAttach({pid: args.pid, wait: true, timeout_ms: 5000});
 if (!attach.ok) return attach;
 try {
+  sys.ptraceSetOptions({pid: args.pid, options: "PTRACE_O_TRACESYSGOOD"});
+  const regs = sys.ptraceGetRegs({pid: args.pid});
   const bytes = sys.ptraceRead({pid: args.pid, address: args.address, length: 32, encoding: "hex"});
-  return {attach, bytes};
+  return {attach, regs, bytes};
 } finally {
   sys.ptraceDetach({pid: args.pid});
 }
 ```
+
+`sys.ptraceGetRegs({pid})` returns raw architecture registers as hex strings under `registers` and, where the architecture ABI is known, a normalized `syscall` object with `nr`, `name`, `args`, `retval`, `pc`, and `sp`. Syscall names are generated from `golang.org/x/sys/unix` syscall-number tables at build time. `sys.ptraceSetOptions({pid, options})` accepts constants such as `PTRACE_O_TRACESYSGOOD`.
 
 Use `processVMReadv` when you only need a bulk memory copy and policy allows it. Use ptrace when you need stop-the-world semantics or ptrace-specific control.
 

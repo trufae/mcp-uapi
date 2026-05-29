@@ -35,7 +35,7 @@ Examples:
 
 - `Exec`, `Exit`, mount/module/keyring namespace mutations, and other process- or host-disruptive calls are not first-class eval helpers.
 - Struct-heavy ioctl conveniences are covered by generic `sys.ioctl` and managed buffers instead of a separate wrapper for every device-specific structure.
-- Architecture-specific ptrace register structures are better handled through `/proc/<pid>/syscall`, `sys.ptraceRead`, or future arch-gated wrappers.
+- Architecture-specific ptrace register structures are exposed through `sys.ptraceGetRegs`, which returns raw register fields plus normalized syscall metadata on supported architectures. Syscall names in that metadata are generated from `golang.org/x/sys/unix` syscall-number tables at build time.
 
 ## How To Audit Coverage
 

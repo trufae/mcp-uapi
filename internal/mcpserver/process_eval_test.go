@@ -118,6 +118,86 @@ func TestPtraceAttachAndReadChildMemory(t *testing.T) {
 	requireOK(t, detach)
 }
 
+func TestEvalPtraceSyscallSequencePinsOSThread(t *testing.T) {
+	app, _ := New(Config{})
+	defer app.Close()
+
+	cmd := exec.Command("sh", "-c", "exec cat /dev/zero >/dev/null")
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start child: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	resp, result := callEvalForTest(t, app, map[string]any{"script": `
+const attach = sys.ptraceAttach({pid: args.pid, wait: true, timeout_ms: 3000});
+if (!attach.ok) return {attach};
+let options = null;
+let step = null;
+let wait = null;
+let regs = null;
+let detach = null;
+try {
+  options = sys.ptraceSetOptions({pid: args.pid, options: "PTRACE_O_TRACESYSGOOD"});
+  step = sys.ptraceSyscall({pid: args.pid, signal: 0});
+  if (step.ok) {
+    wait = sys.wait4({pid: args.pid, options: "WUNTRACED", timeout_ms: 3000});
+    if (wait.ok) regs = sys.ptraceGetRegs({pid: args.pid});
+  }
+} finally {
+  detach = sys.ptraceDetach({pid: args.pid});
+}
+return {attach, options, step, wait, regs, detach};
+`, "args": map[string]any{"pid": cmd.Process.Pid}, "timeout_ms": 10000})
+	if result.IsError || !resp.OK {
+		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
+	}
+	value := resp.Result.(map[string]any)
+	attach := nestedMap(t, value, "attach")
+	if attach["ok"] != true {
+		if attach["errno_name"] == "EPERM" || attach["errno_name"] == "EACCES" {
+			t.Skipf("ptrace denied by kernel policy: %#v", attach)
+		}
+		t.Fatalf("ptrace attach failed: %#v", attach)
+	}
+	requireNestedOK(t, value, "options")
+	requireNestedOK(t, value, "step")
+	requireNestedOK(t, value, "wait")
+	requireNestedOK(t, value, "regs")
+	requireNestedOK(t, value, "detach")
+	regs := nestedMap(t, value, "regs")
+	if _, ok := regs["registers"].(map[string]any); !ok {
+		t.Fatalf("regs missing raw register map: %#v", regs)
+	}
+	syscall := nestedMap(t, regs, "syscall")
+	if name, ok := syscall["name"].(string); !ok || name == "" {
+		t.Fatalf("syscall metadata missing name: %#v", syscall)
+	}
+}
+
+func TestLinuxSyscallNameGeneratedFromXSysUnix(t *testing.T) {
+	cases := []struct {
+		arch string
+		nr   uint64
+		name string
+	}{
+		{"amd64", 0, "read"},
+		{"x86_64", 0, "read"},
+		{"386", 3, "read"},
+		{"arm64", 63, "read"},
+		{"aarch64", 63, "read"},
+		{"riscv64", 63, "read"},
+	}
+	for _, tc := range cases {
+		name, ok := linuxSyscallName(tc.arch, tc.nr)
+		if !ok || name != tc.name {
+			t.Fatalf("linuxSyscallName(%q, %d) = %q, %v; want %q, true", tc.arch, tc.nr, name, ok, tc.name)
+		}
+	}
+}
+
 func callEvalForTest(t *testing.T, app *App, arguments map[string]any) (evalResponse, *mcp.CallToolResult) {
 	t.Helper()
 	result := callToolResultForTest(t, app, "eval", arguments)
