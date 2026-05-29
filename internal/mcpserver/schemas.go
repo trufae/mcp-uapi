@@ -108,7 +108,7 @@ const schemaBufferInfo = `{
 const schemaBufferWrite = `{
   "type":"object",
   "additionalProperties":false,
-  "properties":{"name":{"type":"string"},"offset":{"type":["integer","string"],"default":0},"data_base64":{"type":"string"},"data_hex":{"type":"string"},"data_utf8":{"type":"string"},"fill":{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["zero","value","random"],"default":"zero"},"length":{"type":["integer","string"]},"value":{"type":["integer","string"],"default":0},"seed":{"type":["integer","string"],"default":0}},"required":["length"]}},
+  "properties":{"name":{"type":"string"},"offset":{"type":["integer","string"],"default":0},"data_base64":{"type":"string"},"data_hex":{"type":"string"},"data_utf8":{"type":"string"},"fill":{"type":"object","additionalProperties":false,"properties":{"mode":{"type":"string","enum":["zero","value"],"default":"zero"},"length":{"type":["integer","string"]},"value":{"type":["integer","string"],"default":0}},"required":["length"]}},
   "required":["name"]
 }`
 
@@ -324,8 +324,8 @@ const schemaPrctl = `{
 
 const schemaEval = `{
   "type":"object",
-  "description":"Execute JavaScript inside a function body. Discover the full scripting API at uapi://scripting-api or in uapi_capabilities.scripting_api.",
+  "description":"Execute JavaScript inside a function body. Discover the full scripting API at uapi://scripting-api or in the capabilities resource.",
   "additionalProperties":false,
-  "properties":{"script":{"type":"string","description":"JavaScript source. Globals: args, console, print, uapi, sys, rng."},"args":{"type":"object"},"timeout_ms":{"type":["integer","string"],"default":5000},"max_log_entries":{"type":["integer","string"],"default":200},"max_result_bytes":{"type":["integer","string"]}},
+  "properties":{"script":{"type":"string","description":"JavaScript source. Globals: args, console, print, sys, uapi."},"args":{"type":"object"},"timeout_ms":{"type":["integer","string"],"default":5000},"max_log_entries":{"type":["integer","string"],"default":200},"max_result_bytes":{"type":["integer","string"]}},
   "required":["script"]
 }`

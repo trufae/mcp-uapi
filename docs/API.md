@@ -1,6 +1,6 @@
 # API Reference
 
-Start with `uapi_capabilities`, `uapi_constants`, and `uapi://state`. The server exposes process-local handles for FDs, buffers, and mappings so agents do not need to juggle raw integer FDs.
+Start with `uapi://capabilities` and `uapi://scripting-api`. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, and mappings inside the JavaScript `sys`/`uapi` scripting API so agents do not need to juggle raw integer FDs.
 
 ## Result Model
 
@@ -10,7 +10,7 @@ Syscall errno is data:
 {"ok": false, "errno": 111, "errno_name": "ECONNREFUSED", "error": "connection refused"}
 ```
 
-Invalid MCP inputs are tool errors: unknown handles, unsupported encodings, invalid ranges, malformed constants, or oversized reads.
+Invalid script inputs are eval errors: unknown handles, unsupported encodings, invalid ranges, malformed constants, or oversized reads.
 
 ## Constant Expressions
 
@@ -20,29 +20,31 @@ Fields typed as integer or string accept numeric values, hex strings, or constan
 {"flags":"O_RDWR|O_CREAT|O_CLOEXEC"}
 ```
 
-Use `uapi_constants` for supported groups: `open_flags`, `socket`, `mmap`, `poll`, `epoll`, `signal`, `wait`, `ioctl`, `prctl`, and `errno`.
+Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `memfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `ioctl`, `prctl`, and `errno`.
 
 ## Handles
 
-Managed handles are returned by tools that create resources. Use `handle` for normal FD tools, `mapping` for memory mappings, and `name` for buffers. Raw FDs require `--allow-raw-fd`.
+Managed handles are returned by script helpers that create resources. Use `handle` for normal FD helpers, `mapping` for memory mappings, and `name` for buffers. Raw FDs require `--allow-raw-fd`.
 
-## Tool Groups
+## Scripting Groups
 
-- Metadata: `uapi_capabilities`, `uapi_constants`, `uapi_errno`, `uapi_uname`, `uapi_getpid`.
-- Files: `uapi_open`, `uapi_close`, `uapi_read`, `uapi_write`, `uapi_pread`, `uapi_pwrite`, `uapi_lseek`, `uapi_fstat`, `uapi_stat`, `uapi_readlink`.
-- Buffers: `uapi_buffer_alloc`, `uapi_buffer_write`, `uapi_buffer_read`, `uapi_buffer_info`, `uapi_buffer_free`.
-- Memory: `uapi_mmap`, `uapi_mem_write`, `uapi_mem_read`, `uapi_mprotect`, `uapi_msync`, `uapi_madvise`, `uapi_munmap`.
-- Network: `uapi_socket`, `uapi_socketpair`, `uapi_bind`, `uapi_connect`, `uapi_listen`, `uapi_accept`, `uapi_sendto`, `uapi_recvfrom`, `uapi_getsockname`, `uapi_getpeername`, `uapi_setsockopt_int`, `uapi_getsockopt_int`, `uapi_shutdown`.
-- Readiness: `uapi_poll`, `uapi_epoll_create`, `uapi_epoll_ctl`, `uapi_epoll_wait`.
-- Process: `uapi_kill`, `uapi_wait4`, `uapi_prctl`, `uapi_ptrace_attach`, `uapi_ptrace_read`, `uapi_ptrace_write`, `uapi_ptrace_cont`, `uapi_ptrace_syscall`, `uapi_ptrace_detach`.
-- Ioctl: `uapi_ioctl` with `arg` or `buffer`/`buffer_offset`/`buffer_length`.
-- Scripting: `eval`.
+- Metadata: `sys.capabilities`, `sys.constants`, `sys.constant`, `sys.errno`, `sys.uname`, `sys.getpid`, `sys.getids`, `sys.state`.
+- Files: `sys.open`, `sys.openat`, `sys.close`, `sys.read`, `sys.write`, `sys.pread`, `sys.pwrite`, `sys.lseek`, `sys.fstat`, `sys.fstatat`, `sys.stat`, `sys.statfs`, `sys.fstatfs`, `sys.statx`, `sys.readlink`, `sys.readlinkat`, `sys.truncate`, `sys.ftruncate`, `sys.fsync`, `sys.fdatasync`, `sys.sync`, `sys.syncfs`.
+- Descriptor controls: `sys.dup`, `sys.dup2`, `sys.dup3`, `sys.pipe`, `sys.pipe2`, `sys.closeRange`, `sys.setNonblock`, `sys.fcntlInt`.
+- Filesystem mutation: `sys.access`, `sys.faccessat`, `sys.chmod`, `sys.fchmod`, `sys.fchmodat`, `sys.chown`, `sys.fchown`, `sys.fchownat`, `sys.lchown`, `sys.mkdir`, `sys.mkdirat`, `sys.mkfifo`, `sys.mkfifoat`, `sys.mknod`, `sys.mknodat`, `sys.link`, `sys.linkat`, `sys.symlink`, `sys.symlinkat`, `sys.unlink`, `sys.unlinkat`, `sys.rmdir`, `sys.rename`, `sys.renameat`, `sys.renameat2`.
+- Buffers: `sys.bufferAlloc`, `sys.bufferWrite`, `sys.bufferRead`, `sys.bufferInfo`, `sys.bufferFree`.
+- Memory: `sys.mmap`, `sys.memWrite`, `sys.memRead`, `sys.mprotect`, `sys.msync`, `sys.madvise`, `sys.munmap`.
+- Network: `sys.socket`, `sys.socketpair`, `sys.bind`, `sys.connect`, `sys.listen`, `sys.accept`, `sys.sendto`, `sys.recvfrom`, `sys.getsockname`, `sys.getpeername`, `sys.setsockoptInt`, `sys.getsockoptInt`, `sys.shutdown`.
+- Readiness and event sources: `sys.poll`, `sys.epollCreate`, `sys.epollCtl`, `sys.epollWait`, `sys.eventfd`, `sys.inotifyInit`, `sys.inotifyInit1`, `sys.inotifyAddWatch`, `sys.inotifyRmWatch`, `sys.memfdCreate`.
+- Process and resources: `sys.kill`, `sys.wait4`, `sys.prctl`, `sys.ptraceAttach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceDetach`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.getrusage`.
+- Extended attributes and transfer: `sys.getxattr`, `sys.lgetxattr`, `sys.fgetxattr`, `sys.listxattr`, `sys.llistxattr`, `sys.flistxattr`, `sys.setxattr`, `sys.lsetxattr`, `sys.fsetxattr`, `sys.removexattr`, `sys.lremovexattr`, `sys.fremovexattr`, `sys.sendfile`, `sys.copyFileRange`.
+- Ioctl: `sys.ioctl` with `arg` or `buffer`/`buffer_offset`/`buffer_length`.
 
 ## Ptrace Workflow
 
-1. Attach with `uapi_ptrace_attach({pid, wait:true})`.
-2. Read or write bounded ranges with `uapi_ptrace_read` and `uapi_ptrace_write`.
-3. Continue or syscall-step with `uapi_ptrace_cont` or `uapi_ptrace_syscall` when needed.
-4. Detach with `uapi_ptrace_detach`.
+1. Attach with `sys.ptraceAttach({pid, wait:true})`.
+2. Read or write bounded ranges with `sys.ptraceRead` and `sys.ptraceWrite`.
+3. Continue or syscall-step with `sys.ptraceCont` or `sys.ptraceSyscall` when needed.
+4. Detach with `sys.ptraceDetach`.
 
 Linux Yama and capability policy still applies. For non-child targets, the server process may need `CAP_SYS_PTRACE` or a permissive `ptrace_scope`.

@@ -10,30 +10,29 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	if doc.ClientBootstrap.ScriptingAPIResource != "uapi://scripting-api" {
 		t.Fatalf("scripting resource = %q", doc.ClientBootstrap.ScriptingAPIResource)
 	}
-	wantTools := map[string]bool{
-		"uapi_capabilities": false,
-		"uapi_open":         false,
-		"uapi_socketpair":   false,
-		"uapi_mmap":         false,
-		"uapi_ioctl":        false,
-		"uapi_ptrace_read":  false,
-		"eval":              false,
+	if len(doc.Tools) != 1 || doc.Tools[0].Name != "eval" {
+		t.Fatalf("public tools = %#v, want eval only", doc.Tools)
 	}
-	for _, tool := range doc.Tools {
-		if _, ok := wantTools[tool.Name]; ok {
-			wantTools[tool.Name] = true
-		}
-	}
-	for name, found := range wantTools {
-		if !found {
-			t.Fatalf("capabilities missing tool %s", name)
-		}
+	if len(toolSummaryRegistry()) != 1 || toolSummaryRegistry()[0].name != "eval" {
+		t.Fatalf("tool registry should expose only eval: %#v", toolSummaryRegistry())
 	}
 	if !containsString(doc.ScriptingAPI.UAPIWrappers, "socketpair") || !containsString(doc.ScriptingAPI.UAPIWrappers, "ptraceRead") {
-		t.Fatalf("scripting wrappers missing expected entries: %#v", doc.ScriptingAPI.UAPIWrappers)
+		t.Fatalf("legacy scripting wrappers missing expected entries: %#v", doc.ScriptingAPI.UAPIWrappers)
 	}
-	if _, ok := doc.Constants["open_flags"]; !ok {
-		t.Fatalf("capabilities missing open_flags constants")
+	for _, name := range []string{"openat", "fstatat", "statx", "eventfd", "memfdCreate", "getxattr", "copyFileRange"} {
+		if !containsString(doc.ScriptingAPI.UAPIWrappers, name) {
+			t.Fatalf("scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.UAPIWrappers)
+		}
+	}
+	for _, global := range doc.ScriptingAPI.Globals {
+		if global.Name == "rng" {
+			t.Fatalf("rng global should not be documented: %#v", doc.ScriptingAPI.Globals)
+		}
+	}
+	for _, group := range []string{"open_flags", "at", "eventfd", "inotify", "statx", "rlimit"} {
+		if _, ok := doc.Constants[group]; !ok {
+			t.Fatalf("capabilities missing %s constants", group)
+		}
 	}
 }
 

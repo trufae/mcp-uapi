@@ -89,7 +89,7 @@ func New(config Config) (*App, *server.MCPServer) {
 }
 
 func serverInstructions() string {
-	return "Start by calling uapi_capabilities or reading uapi://capabilities; it contains client_bootstrap, constants, tool groups, and scripting metadata. Use uapi://scripting-api or prompt uapi_eval_quickstart before eval. The eval tool runs JavaScript inside a function body with globals args, console, print, uapi, sys, and rng. uapi.* wrappers are camelCase aliases for MCP tools and accept the same JSON arguments. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed tool arguments are MCP tool errors. Prefer managed handles returned by uapi_open, uapi_socket, uapi_socketpair, uapi_epoll_create, uapi_buffer_alloc, and uapi_mmap; raw integer FDs require --allow-raw-fd."
+	return "Start by reading uapi://capabilities and uapi://scripting-api. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, and uapi. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, xattrs, eventfd/inotify, process helpers, and ioctl. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, and sys.eventfd; raw integer FDs require --allow-raw-fd."
 }
 
 func (a *App) Close() {
@@ -134,7 +134,7 @@ func (a *App) registerResources(srv *server.MCPServer) {
 func (a *App) registerPrompts(srv *server.MCPServer) {
 	srv.AddPrompt(mcp.NewPrompt("uapi_recon_quickstart", mcp.WithPromptDescription("Plan a Linux user-mode attack-surface reconnaissance workflow."), mcp.WithArgument("target", mcp.ArgumentDescription("Optional process, path, socket, or subsystem to inspect."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		target := request.Params.Arguments["target"]
-		text := "Read uapi://capabilities and uapi://api-reference. Collect uapi_uname, constants, relevant stat/readlink data, then use managed handles for files, sockets, poll/epoll, ioctl buffers, or ptrace. Treat ok=false errno results as observations and reserve MCP tool errors for malformed requests."
+		text := "Read uapi://capabilities and uapi://scripting-api. Use eval with sys.uname(), sys.constants(), relevant sys.stat/sys.readlink/sys.statx data, then managed handles for files, sockets, poll/epoll, ioctl buffers, or ptrace. Treat ok=false errno results as observations and reserve eval errors for malformed script arguments."
 		if target != "" {
 			text += "\n\nTarget:\n" + target
 		}
@@ -142,15 +142,15 @@ func (a *App) registerPrompts(srv *server.MCPServer) {
 	})
 	srv.AddPrompt(mcp.NewPrompt("uapi_eval_quickstart", mcp.WithPromptDescription("Discover and safely probe the JavaScript eval API."), mcp.WithArgument("goal", mcp.ArgumentDescription("Optional task to accomplish with eval."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		goal := request.Params.Arguments["goal"]
-		text := "Read uapi://scripting-api and uapi://capabilities. Then run a read-only eval probe: const caps = uapi.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, constants: Object.keys(uapi.constants().constants), uname: uapi.uname()}; Use args for caller JSON, console.* for captured logs, uapi.* for tool wrappers, and rng.local(seed) for deterministic data generation."
+		text := "Read uapi://scripting-api and uapi://capabilities. Then run a read-only eval probe: const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, constants: Object.keys(sys.constants().constants), uname: sys.uname()}; Use args for caller JSON, console.* for captured logs, and sys.* or uapi.* for synchronous Unix wrappers."
 		if goal != "" {
 			text += "\n\nGoal:\n" + goal
 		}
 		return &mcp.GetPromptResult{Description: "Linux UAPI eval quickstart", Messages: []mcp.PromptMessage{mcp.NewPromptMessage(mcp.RoleUser, mcp.NewTextContent(text))}}, nil
 	})
-	srv.AddPrompt(mcp.NewPrompt("uapi_ptrace_memory_probe", mcp.WithPromptDescription("Use ptrace tools to attach to a process and read memory safely."), mcp.WithArgument("pid", mcp.ArgumentDescription("Target PID and any known address/range context."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
+	srv.AddPrompt(mcp.NewPrompt("uapi_ptrace_memory_probe", mcp.WithPromptDescription("Use eval ptrace helpers to attach to a process and read memory safely."), mcp.WithArgument("pid", mcp.ArgumentDescription("Target PID and any known address/range context."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		pid := request.Params.Arguments["pid"]
-		text := "Read uapi://api-reference. Attach with uapi_ptrace_attach({pid, wait:true}), confirm the SIGSTOP with uapi_wait4 if needed, read small bounded ranges with uapi_ptrace_read({pid,address,length,encoding:'hex'}), then always detach with uapi_ptrace_detach. Keep addresses as hex strings."
+		text := "Read uapi://scripting-api. In eval, attach with sys.ptraceAttach({pid, wait:true}), confirm the SIGSTOP with sys.wait4 if needed, read small bounded ranges with sys.ptraceRead({pid,address,length,encoding:'hex'}), then always detach with sys.ptraceDetach. Keep addresses as hex strings."
 		if pid != "" {
 			text += "\n\nPID/address context:\n" + pid
 		}
@@ -158,7 +158,7 @@ func (a *App) registerPrompts(srv *server.MCPServer) {
 	})
 	srv.AddPrompt(mcp.NewPrompt("uapi_socket_fuzzing", mcp.WithPromptDescription("Build deterministic socket/client experiments with eval."), mcp.WithArgument("service", mcp.ArgumentDescription("Socket family, address, protocol, or service under test."))), func(ctx context.Context, request mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 		service := request.Params.Arguments["service"]
-		text := "Use uapi_socket with SOCK_NONBLOCK or uapi_socketpair for local experiments, uapi_poll/uapi_epoll_wait for readiness, and uapi_sendto/uapi_recvfrom for payload exchange. In eval, generate deterministic byte variants with rng.local(seed).bytes(length,'hex') and return per-iteration errno/result metadata."
+		text := "Use eval with sys.socket({type:'SOCK_STREAM|SOCK_NONBLOCK|SOCK_CLOEXEC'}) or sys.socketpair for local experiments, sys.poll/sys.epollWait for readiness, and sys.sendto/sys.recvfrom for payload exchange. Provide payload bytes explicitly through args, buffers, data_hex, data_base64, or data_utf8 and return per-iteration errno/result metadata."
 		if service != "" {
 			text += "\n\nService:\n" + service
 		}

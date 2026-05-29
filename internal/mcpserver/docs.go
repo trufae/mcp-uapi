@@ -1,13 +1,13 @@
 package mcpserver
 
 func apiReferenceMarkdown() string {
-	return `# Linux UAPI MCP API Reference
+	return `# Linux UAPI API Reference
 
-Agents should begin with ` + "`uapi_capabilities`" + ` or ` + "`uapi://capabilities`" + `, then read ` + "`uapi_constants`" + ` for symbolic values accepted by schemas. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
+Agents should begin by reading ` + "`uapi://capabilities`" + ` and ` + "`uapi://scripting-api`" + `. The only public MCP tool is ` + "`eval`" + `; all Linux UAPI operations are available inside eval through the ` + "`sys`" + ` object, with ` + "`uapi`" + ` kept as an alias for older scripts. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
 
 ## Result Model
 
-Malformed arguments, unknown handles, oversized reads, and invalid buffer ranges are MCP tool errors. Linux syscall failures are normal observations and return structured JSON like:
+Malformed script arguments, unknown handles, oversized reads, and invalid buffer ranges are eval errors. Linux syscall failures are normal observations and return structured JSON like:
 
 ` + "```json" + `
 {"ok": false, "errno": 2, "errno_name": "ENOENT", "error": "no such file or directory"}
@@ -17,15 +17,17 @@ Successful syscall wrappers return ` + "`ok: true`" + ` plus syscall-specific fi
 
 ## Core Workflows
 
-- Reconnaissance: ` + "`uapi_uname`" + `, ` + "`uapi_stat`" + `, ` + "`uapi_readlink`" + `, ` + "`uapi_open`" + `, ` + "`uapi_read`" + `, and ` + "`uapi_close`" + `.
-- Socket clients: ` + "`uapi_socket`" + ` or ` + "`uapi_socketpair`" + `, then ` + "`uapi_connect`" + `, ` + "`uapi_sendto`" + `, ` + "`uapi_recvfrom`" + `, ` + "`uapi_poll`" + ` or ` + "`uapi_epoll_wait`" + `.
-- ioctl probing: allocate a buffer with ` + "`uapi_buffer_alloc`" + `, initialize it with ` + "`uapi_buffer_write`" + `, call ` + "`uapi_ioctl`" + ` with ` + "`buffer`" + `, then inspect with ` + "`uapi_buffer_read`" + `.
-- ptrace memory reads: ` + "`uapi_ptrace_attach`" + ` with wait enabled, ` + "`uapi_ptrace_read`" + ` bounded ranges, then ` + "`uapi_ptrace_detach`" + `.
-- mmap experiments: ` + "`uapi_mmap`" + ` anonymous or file-backed memory, mutate with ` + "`uapi_mem_write`" + `, inspect with ` + "`uapi_mem_read`" + `, and clean up with ` + "`uapi_munmap`" + `.
+- Reconnaissance: ` + "`sys.uname()`" + `, ` + "`sys.stat()`" + `, ` + "`sys.statx()`" + `, ` + "`sys.readlink()`" + `, ` + "`sys.open()`" + `, ` + "`sys.read()`" + `, and ` + "`sys.close()`" + `.
+- Filesystem mutation: ` + "`sys.openat()`" + `, ` + "`sys.fstatat()`" + `, ` + "`sys.mkdirat()`" + `, ` + "`sys.renameat2()`" + `, ` + "`sys.fchmodat()`" + `, and ` + "`sys.unlinkat()`" + `.
+- Socket clients: ` + "`sys.socket()`" + ` or ` + "`sys.socketpair()`" + `, then ` + "`sys.connect()`" + `, ` + "`sys.sendto()`" + `, ` + "`sys.recvfrom()`" + `, ` + "`sys.poll()`" + ` or ` + "`sys.epollWait()`" + `.
+- ioctl probing: allocate a buffer with ` + "`sys.bufferAlloc()`" + `, initialize it with ` + "`sys.bufferWrite()`" + `, call ` + "`sys.ioctl()`" + ` with ` + "`buffer`" + `, then inspect with ` + "`sys.bufferRead()`" + `.
+- ptrace memory reads: ` + "`sys.ptraceAttach()`" + ` with wait enabled, ` + "`sys.ptraceRead()`" + ` bounded ranges, then ` + "`sys.ptraceDetach()`" + `.
+- mmap experiments: ` + "`sys.mmap()`" + ` anonymous or file-backed memory, mutate with ` + "`sys.memWrite()`" + `, inspect with ` + "`sys.memRead()`" + `, and clean up with ` + "`sys.munmap()`" + `.
+- Event and metadata helpers: ` + "`sys.eventfd()`" + `, ` + "`sys.memfdCreate()`" + `, ` + "`sys.inotifyInit1()`" + `, ` + "`sys.getxattr()`" + `, ` + "`sys.setxattr()`" + `, ` + "`sys.sendfile()`" + `, and ` + "`sys.copyFileRange()`" + `.
 
 ## Safety Notes
 
-This server intentionally exposes primitives useful for embedded systems testing and low-level research. It can modify the filesystem, signal processes, attach to processes permitted by Linux ptrace policy, and issue arbitrary ioctls. Run it in an isolated lab environment with a trusted MCP client.
+This server intentionally exposes primitives useful for embedded systems testing and low-level research. Eval scripts can modify the filesystem, signal processes, attach to processes permitted by Linux ptrace policy, and issue arbitrary ioctls. Run it in an isolated lab environment with a trusted MCP client.
 `
 }
 
@@ -50,40 +52,43 @@ Globals:
 
 - ` + "`args`" + `: caller-provided JSON object.
 - ` + "`console`" + ` and ` + "`print`" + `: captured logging.
-- ` + "`uapi`" + `: synchronous wrappers for MCP tools, plus ` + "`uapi.state()`" + ` and ` + "`uapi.hex(value, width)`" + `.
-- ` + "`sys`" + `: alias for ` + "`uapi`" + `.
-- ` + "`rng`" + `: deterministic local RNG for repeatable payloads.
+- ` + "`sys`" + `: synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers.
+- ` + "`uapi`" + `: alias for ` + "`sys`" + ` for compatibility with older scripts.
 
 Safe bootstrap:
 
 ` + "```javascript" + `
-const caps = uapi.capabilities();
+const caps = sys.capabilities();
 return {
   name: caps.name,
   wrappers: caps.scripting_api.uapi_wrappers,
-  uname: uapi.uname(),
-  openFlags: uapi.constants({group: "open_flags"}).constants
+  uname: sys.uname(),
+  openFlags: sys.constants({group: "open_flags"}).constants
 };
 ` + "```" + `
 
 Socketpair round trip:
 
 ` + "```javascript" + `
-const pair = uapi.socketpair({type: "SOCK_STREAM|SOCK_CLOEXEC"});
-uapi.write({handle: pair.handles[0], data_utf8: "ping"});
-const got = uapi.read({handle: pair.handles[1], length: 4, encoding: "utf8"});
-uapi.close({handle: pair.handles[0]});
-uapi.close({handle: pair.handles[1]});
+const pair = sys.socketpair({type: "SOCK_STREAM|SOCK_CLOEXEC"});
+sys.write({handle: pair.handles[0], data_utf8: "ping"});
+const got = sys.read({handle: pair.handles[1], length: 4, encoding: "utf8"});
+sys.close({handle: pair.handles[0]});
+sys.close({handle: pair.handles[1]});
 return got;
 ` + "```" + `
 
-Deterministic payload generation:
+At-family file workflow:
 
 ` + "```javascript" + `
-const r = rng.local(args.seed || "550e8400-e29b-41d4-a716-446655440000");
-return {u64: r.uint64(), bytes: r.bytes(32, "hex"), pick: r.choice(["read", "write", "ioctl"])};
+const file = sys.openat({path: args.path, flags: "O_RDWR|O_CREAT|O_TRUNC|O_CLOEXEC", mode: "0600"});
+sys.write({handle: file.handle, data_utf8: args.payload || "hello"});
+sys.fsync({handle: file.handle});
+const stat = sys.fstatat({path: args.path});
+sys.close({handle: file.handle});
+return stat;
 ` + "```" + `
 
-Every wrapper accepts the same JSON shape as the corresponding MCP tool. Syscall errno results are returned as normal data, so scripts should check ` + "`result.ok === false`" + ` when exploring expected failure cases.
+Legacy wrappers such as ` + "`sys.open()`" + ` and ` + "`sys.socketpair()`" + ` accept the same JSON shape they used before. New script-only wrappers follow the lower camel-case form of their ` + "`golang.org/x/sys/unix`" + ` names where possible, such as ` + "`sys.fstatat()`" + `, ` + "`sys.memfdCreate()`" + `, and ` + "`sys.copyFileRange()`" + `. Syscall errno results are returned as normal data, so scripts should check ` + "`result.ok === false`" + ` when exploring expected failure cases.
 `
 }

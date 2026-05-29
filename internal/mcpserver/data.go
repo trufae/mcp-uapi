@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math/rand"
 	"unicode/utf8"
 )
 
@@ -13,7 +12,6 @@ type fillSpec struct {
 	Mode   string `json:"mode"`
 	Length Uint64 `json:"length"`
 	Value  Uint64 `json:"value"`
-	Seed   Uint64 `json:"seed"`
 }
 
 func encodeBytes(data []byte, encoding string) (map[string]any, error) {
@@ -89,10 +87,6 @@ func fillBytes(fill *fillSpec) ([]byte, error) {
 		for i := range data {
 			data[i] = byte(fill.Value)
 		}
-		return data, nil
-	case "random":
-		r := rand.New(rand.NewSource(int64(fill.Seed)))
-		_, _ = r.Read(data)
 		return data, nil
 	default:
 		return nil, fmt.Errorf("unsupported fill mode %q", mode)

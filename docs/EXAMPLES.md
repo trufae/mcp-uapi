@@ -3,56 +3,63 @@
 ## Read A File
 
 ```json
-{"name":"uapi_open","arguments":{"path":"/proc/version","flags":"O_RDONLY|O_CLOEXEC","handle":"version"}}
-```
-
-```json
-{"name":"uapi_read","arguments":{"handle":"version","length":4096,"encoding":"utf8"}}
-```
-
-```json
-{"name":"uapi_close","arguments":{"handle":"version"}}
+{
+  "name": "eval",
+  "arguments": {
+    "script": "const fd = sys.open({path:'/proc/version', flags:'O_RDONLY|O_CLOEXEC', handle:'version'}); try { return sys.read({handle: fd.handle, length:4096, encoding:'utf8'}); } finally { sys.close({handle: fd.handle}); }"
+  }
+}
 ```
 
 ## Anonymous Mmap
 
 ```json
-{"name":"uapi_mmap","arguments":{"length":4096,"handle":"scratch"}}
-```
-
-```json
-{"name":"uapi_mem_write","arguments":{"mapping":"scratch","data_hex":"41424344"}}
-```
-
-```json
-{"name":"uapi_mem_read","arguments":{"mapping":"scratch","length":4,"encoding":"utf8"}}
+{
+  "name": "eval",
+  "arguments": {
+    "script": "const mapped = sys.mmap({length:4096, handle:'scratch'}); sys.memWrite({mapping:'scratch', data_hex:'41424344'}); const got = sys.memRead({mapping:'scratch', length:4, encoding:'utf8'}); sys.munmap({mapping:'scratch'}); return got;"
+  }
+}
 ```
 
 ## Ioctl With A Managed Buffer
 
 ```javascript
-const pair = uapi.socketpair({handles: ["w", "r"]});
-uapi.write({handle: "w", data_utf8: "abc"});
-uapi.bufferAlloc({name: "argp", size: 8});
-const ioctl = uapi.ioctl({handle: "r", request: "FIONREAD", buffer: "argp", buffer_length: 4});
-const argp = uapi.bufferRead({name: "argp", length: 4, encoding: "hex"});
+const pair = sys.socketpair({handles: ["w", "r"]});
+sys.write({handle: "w", data_utf8: "abc"});
+sys.bufferAlloc({name: "argp", size: 8});
+const ioctl = sys.ioctl({handle: "r", request: "FIONREAD", buffer: "argp", buffer_length: 4});
+const argp = sys.bufferRead({name: "argp", length: 4, encoding: "hex"});
+sys.close({handle: "w"});
+sys.close({handle: "r"});
 return {ioctl, argp};
 ```
 
-## Deterministic Socket Fuzz Skeleton
+## Socket Payload Loop
 
 ```javascript
-const seed = args.seed || "550e8400-e29b-41d4-a716-446655440000";
+const payloads = args.payloads || ["00", "414243", "ff00ff"];
 const results = [];
-for (let i = 0; i < 16; i++) {
-  const r = rng.create({originalSeed: seed, iteration: i});
-  const payload = r.bytes(r.range(1, 64), "hex");
-  const pair = uapi.socketpair({});
-  const sent = uapi.sendto({handle: pair.handles[0], data_hex: payload});
-  const recv = uapi.recvfrom({handle: pair.handles[1], length: 64, encoding: "hex"});
-  uapi.close({handle: pair.handles[0]});
-  uapi.close({handle: pair.handles[1]});
-  results.push({iteration: i, seed: r.info().seed, sent, recv});
+for (let i = 0; i < payloads.length; i++) {
+  const pair = sys.socketpair({});
+  const sent = sys.sendto({handle: pair.handles[0], data_hex: payloads[i]});
+  const recv = sys.recvfrom({handle: pair.handles[1], length: 64, encoding: "hex"});
+  sys.close({handle: pair.handles[0]});
+  sys.close({handle: pair.handles[1]});
+  results.push({iteration: i, sent, recv});
 }
 return results;
+```
+
+## At-Family And Xattr Probe
+
+```javascript
+const path = args.path;
+const fd = sys.openat({path, flags: "O_RDWR|O_CREAT|O_TRUNC|O_CLOEXEC", mode: "0600", handle: "target"});
+sys.write({handle: "target", data_utf8: "hello"});
+sys.setxattr({path, name: "user.mcp_uapi", data_utf8: "ok"});
+const xattr = sys.getxattr({path, name: "user.mcp_uapi", encoding: "utf8"});
+const statx = sys.statx({path, mask: "STATX_BASIC_STATS"});
+sys.close({handle: "target"});
+return {fd, xattr, statx};
 ```

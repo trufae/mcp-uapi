@@ -2,15 +2,13 @@ package mcpserver
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/binary"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,12 +18,11 @@ import (
 )
 
 const (
-	defaultEvalTimeoutMS    = 5000
-	maxEvalTimeoutMS        = 12 * 60 * 60 * 1000
-	defaultEvalLogEntries   = 200
-	maxEvalLogEntries       = 1000
-	defaultMaxResultBytes   = 1 << 20
-	maxScriptGeneratedBytes = 1 << 20
+	defaultEvalTimeoutMS  = 5000
+	maxEvalTimeoutMS      = 12 * 60 * 60 * 1000
+	defaultEvalLogEntries = 200
+	maxEvalLogEntries     = 1000
+	defaultMaxResultBytes = 1 << 20
 )
 
 type evalArgs struct {
@@ -118,10 +115,6 @@ func (a *App) handleEval(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	if err := vm.Set("sys", uapi); err != nil {
 		return toolError(err)
 	}
-	if err := vm.Set("rng", env.rngNamespace()); err != nil {
-		return toolError(err)
-	}
-
 	timeoutErr := fmt.Errorf("script exceeded timeout_ms=%d", timeoutMS)
 	timer := time.AfterFunc(time.Duration(timeoutMS)*time.Millisecond, func() { vm.Interrupt(timeoutErr) })
 	stopContextInterrupt := context.AfterFunc(ctx, func() { vm.Interrupt(ctx.Err()) })
@@ -186,15 +179,6 @@ func (e *scriptEnv) logFunc(level string) func(goja.FunctionCall) goja.Value {
 
 func (e *scriptEnv) uapiObject() *goja.Object {
 	obj := e.vm.NewObject()
-	_ = obj.Set("callTool", func(call goja.FunctionCall) goja.Value {
-		toolName := call.Argument(0).String()
-		args := exportArgument(call.Argument(1))
-		value, err := e.callTool(toolName, args)
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		return e.vm.ToValue(value)
-	})
 	_ = obj.Set("state", func() any { return e.app.stateSnapshot() })
 	_ = obj.Set("hex", func(call goja.FunctionCall) goja.Value {
 		value, err := jsUint64(call.Argument(0))
@@ -217,6 +201,7 @@ func (e *scriptEnv) uapiObject() *goja.Object {
 	for jsName, toolName := range scriptToolAliases() {
 		_ = obj.Set(jsName, e.toolFunc(toolName))
 	}
+	e.addScriptUnixExtensions(obj)
 	return obj
 }
 
@@ -319,237 +304,14 @@ func scriptToolAliases() map[string]string {
 
 func scriptWrapperNames() []string {
 	aliases := scriptToolAliases()
-	names := make([]string, 0, len(aliases)+3)
+	names := make([]string, 0, len(aliases)+2+len(scriptUnixExtensionNames()))
 	for name := range aliases {
 		names = append(names, name)
 	}
-	names = append(names, "callTool", "state", "hex")
+	names = append(names, "state", "hex")
+	names = append(names, scriptUnixExtensionNames()...)
+	sort.Strings(names)
 	return names
-}
-
-type scriptRNG struct {
-	seed          string
-	originalSeed  string
-	iterationMode bool
-	iteration     uint64
-	state         uint64
-}
-
-func (e *scriptEnv) rngNamespace() *goja.Object {
-	obj := e.vm.NewObject()
-	_ = obj.Set("create", func(call goja.FunctionCall) goja.Value {
-		rngObj, err := e.createRNG(call.Argument(0))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		return rngObj
-	})
-	_ = obj.Set("local", func(call goja.FunctionCall) goja.Value {
-		seed := ""
-		if !goja.IsUndefined(call.Argument(0)) {
-			seed = call.Argument(0).String()
-		}
-		rngObj, err := e.rngObject(newScriptRNG(seed, "", 0, false))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		return rngObj
-	})
-	_ = obj.Set("deriveIterationSeed", func(call goja.FunctionCall) goja.Value {
-		iteration, err := jsUint64(call.Argument(1))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		return e.vm.ToValue(deriveIterationSeed(call.Argument(0).String(), iteration))
-	})
-	return obj
-}
-
-func (e *scriptEnv) createRNG(value goja.Value) (*goja.Object, error) {
-	seed := ""
-	originalSeed := ""
-	var iteration uint64
-	iterationMode := false
-	if !goja.IsUndefined(value) && !goja.IsNull(value) {
-		if goja.IsString(value) {
-			seed = value.String()
-		} else if object := value.ToObject(e.vm); object != nil {
-			if v := object.Get("seed"); !isMissingJSValue(v) {
-				seed = v.String()
-			}
-			if v := object.Get("originalSeed"); !isMissingJSValue(v) {
-				originalSeed = v.String()
-			}
-			if v := object.Get("original_seed"); !isMissingJSValue(v) {
-				originalSeed = v.String()
-			}
-			if v := object.Get("iteration"); !isMissingJSValue(v) {
-				parsed, err := jsUint64(v)
-				if err != nil {
-					return nil, err
-				}
-				iteration = parsed
-				iterationMode = true
-			}
-		}
-	}
-	if iterationMode {
-		base := originalSeed
-		if base == "" {
-			base = seed
-		}
-		if base == "" {
-			return nil, errors.New("rng.create iteration mode requires seed or originalSeed")
-		}
-		seed = deriveIterationSeed(base, iteration)
-		originalSeed = base
-	}
-	return e.rngObject(newScriptRNG(seed, originalSeed, iteration, iterationMode))
-}
-
-func newScriptRNG(seed, originalSeed string, iteration uint64, iterationMode bool) *scriptRNG {
-	if seed == "" {
-		seed = "00000000-0000-4000-8000-000000000000"
-	}
-	hash := sha256.Sum256([]byte(seed))
-	state := binary.LittleEndian.Uint64(hash[:8])
-	if state == 0 {
-		state = 0x9e3779b97f4a7c15
-	}
-	return &scriptRNG{seed: seed, originalSeed: originalSeed, iteration: iteration, iterationMode: iterationMode, state: state}
-}
-
-func (r *scriptRNG) next() uint64 {
-	x := r.state
-	x ^= x >> 12
-	x ^= x << 25
-	x ^= x >> 27
-	r.state = x
-	return x * 2685821657736338717
-}
-
-func (e *scriptEnv) rngObject(r *scriptRNG) (*goja.Object, error) {
-	obj := e.vm.NewObject()
-	_ = obj.Set("info", func() map[string]any { return r.info() })
-	_ = obj.Set("seed", func(seed string) map[string]any {
-		*r = *newScriptRNG(seed, "", 0, false)
-		return r.info()
-	})
-	_ = obj.Set("seedForIteration", func(call goja.FunctionCall) goja.Value {
-		iteration, err := jsUint64(call.Argument(1))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		base := call.Argument(0).String()
-		*r = *newScriptRNG(deriveIterationSeed(base, iteration), base, iteration, true)
-		return e.vm.ToValue(r.info())
-	})
-	_ = obj.Set("seekIteration", func(call goja.FunctionCall) goja.Value {
-		iteration, err := jsUint64(call.Argument(0))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		base := r.originalSeed
-		if base == "" {
-			base = r.seed
-		}
-		*r = *newScriptRNG(deriveIterationSeed(base, iteration), base, iteration, true)
-		return e.vm.ToValue(r.info())
-	})
-	_ = obj.Set("uint32", func() uint32 { return uint32(r.next() >> 32) })
-	_ = obj.Set("int32", func() int32 { return int32(r.next() >> 32) })
-	_ = obj.Set("double", func() float64 { return float64(r.next()>>11) * (1.0 / (1 << 53)) })
-	_ = obj.Set("float", func() float32 { return float32(float64(r.next()>>40) * (1.0 / (1 << 24))) })
-	_ = obj.Set("uint64", func() string { return hex64(r.next()) })
-	_ = obj.Set("uint64Decimal", func() string { return strconv.FormatUint(r.next(), 10) })
-	_ = obj.Set("int64", func() string { return strconv.FormatInt(int64(r.next()), 10) })
-	_ = obj.Set("bytes", func(call goja.FunctionCall) goja.Value {
-		length, err := jsUint64(call.Argument(0))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		if length > maxScriptGeneratedBytes {
-			panic(e.vm.NewGoError(fmt.Errorf("length %d exceeds maximum %d", length, maxScriptGeneratedBytes)))
-		}
-		encoding := "hex"
-		if !goja.IsUndefined(call.Argument(1)) {
-			encoding = call.Argument(1).String()
-		}
-		data := make([]byte, int(length))
-		for i := 0; i < len(data); i += 8 {
-			value := r.next()
-			for j := 0; j < 8 && i+j < len(data); j++ {
-				data[i+j] = byte(value >> (8 * j))
-			}
-		}
-		switch encoding {
-		case "hex":
-			return e.vm.ToValue(hex.EncodeToString(data))
-		case "base64":
-			return e.vm.ToValue(base64.StdEncoding.EncodeToString(data))
-		case "array":
-			values := make([]int, len(data))
-			for i, b := range data {
-				values[i] = int(b)
-			}
-			return e.vm.ToValue(values)
-		default:
-			panic(e.vm.NewGoError(fmt.Errorf("unsupported bytes encoding %q", encoding)))
-		}
-	})
-	_ = obj.Set("range", func(call goja.FunctionCall) goja.Value {
-		min, err := jsUint64(call.Argument(0))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		max, err := jsUint64(call.Argument(1))
-		if err != nil {
-			panic(e.vm.NewGoError(err))
-		}
-		if max <= min {
-			panic(e.vm.NewGoError(errors.New("range max must be greater than min")))
-		}
-		return e.vm.ToValue(float64(min + r.next()%(max-min)))
-	})
-	_ = obj.Set("bool", func(call goja.FunctionCall) goja.Value {
-		probability := 0.5
-		if !goja.IsUndefined(call.Argument(0)) {
-			probability = call.Argument(0).ToFloat()
-		}
-		if probability < 0 || probability > 1 || math.IsNaN(probability) {
-			panic(e.vm.NewGoError(errors.New("probability must be between 0 and 1")))
-		}
-		return e.vm.ToValue((float64(r.next()>>11) * (1.0 / (1 << 53))) < probability)
-	})
-	_ = obj.Set("choice", func(call goja.FunctionCall) goja.Value {
-		array := call.Argument(0).ToObject(e.vm)
-		length := int(array.Get("length").ToInteger())
-		if length <= 0 {
-			panic(e.vm.NewGoError(errors.New("choice requires a non-empty array")))
-		}
-		return array.Get(strconv.Itoa(int(r.next() % uint64(length))))
-	})
-	return obj, nil
-}
-
-func (r *scriptRNG) info() map[string]any {
-	info := map[string]any{"backend": "local", "seed": r.seed, "iteration_mode": r.iterationMode, "iteration": r.iteration}
-	if r.originalSeed != "" {
-		info["original_seed"] = r.originalSeed
-	}
-	return info
-}
-
-func deriveIterationSeed(seed string, iteration uint64) string {
-	h := sha256.New()
-	_, _ = h.Write([]byte(seed))
-	var buf [8]byte
-	binary.LittleEndian.PutUint64(buf[:], iteration)
-	_, _ = h.Write(buf[:])
-	sum := h.Sum(nil)
-	sum[6] = (sum[6] & 0x0f) | 0x40
-	sum[8] = (sum[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%x-%x-%x-%x-%x", sum[0:4], sum[4:6], sum[6:8], sum[8:10], sum[10:16])
 }
 
 func isMissingJSValue(value goja.Value) bool {
