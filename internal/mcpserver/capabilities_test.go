@@ -109,6 +109,9 @@ func TestEmbeddedDocsAndExamples(t *testing.T) {
 	if !strings.Contains(docsIndexMarkdown(), "uapi://api-reference") {
 		t.Fatalf("docs index should list API reference")
 	}
+	if !strings.Contains(apiDocsIndexMarkdown(), "uapi://api/sys-unix") {
+		t.Fatalf("API docs index should list sys/unix reference")
+	}
 }
 
 func TestEmbeddedNetworkInterfaceExampleExecutes(t *testing.T) {
@@ -158,7 +161,7 @@ func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
 	for _, resource := range listed.Resources {
 		resourceURIs = append(resourceURIs, resource.URI)
 	}
-	for _, uri := range []string{"uapi://docs", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
+	for _, uri := range []string{"uapi://docs", "uapi://api", "uapi://api/sys-unix", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
 		if !containsString(resourceURIs, uri) {
 			t.Fatalf("listed resources missing %s: %#v", uri, resourceURIs)
 		}
@@ -179,6 +182,22 @@ func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
 	}
 	if text.MIMEType != mimeJavaScript || !strings.Contains(text.Text, "SIOCGIFINDEX") {
 		t.Fatalf("unexpected example resource contents: %#v", text)
+	}
+
+	readRequest.Params.URI = "uapi://api/sys-unix"
+	read, err = client.ReadResource(t.Context(), readRequest)
+	if err != nil {
+		t.Fatalf("read API resource: %v", err)
+	}
+	if len(read.Contents) != 1 {
+		t.Fatalf("API resource contents = %d", len(read.Contents))
+	}
+	text, ok = read.Contents[0].(mcp.TextResourceContents)
+	if !ok {
+		t.Fatalf("API resource content type = %T", read.Contents[0])
+	}
+	if text.MIMEType != mimeMarkdown || !strings.Contains(text.Text, "processVMReadv") {
+		t.Fatalf("unexpected API resource contents: %#v", text)
 	}
 }
 

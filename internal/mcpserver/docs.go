@@ -123,6 +123,84 @@ func exampleScriptResources() []embeddedResource {
 	return resources
 }
 
+func apiDocResources() []embeddedResource {
+	matches, err := fs.Glob(content.Content, "docs/api/*.md")
+	if err != nil {
+		panic(fmt.Sprintf("glob embedded API docs: %v", err))
+	}
+	sort.Strings(matches)
+
+	resources := make([]embeddedResource, 0, len(matches)*2)
+	for _, file := range matches {
+		text := mustEmbeddedText(file)
+		name, description := markdownTitleAndDescription(file, text)
+		base := path.Base(file)
+		uri := "uapi://api/" + strings.TrimSuffix(base, path.Ext(base))
+		resources = append(resources, embeddedResource{URI: uri, Name: name, Path: file, Description: description, MIMEType: mimeMarkdown})
+		resources = append(resources, embeddedResource{URI: "uapi://" + file, Name: name, Path: file, Description: description, MIMEType: mimeMarkdown})
+	}
+	return resources
+}
+
+func markdownTitleAndDescription(file, text string) (string, string) {
+	title := titleFromName(defaultExampleName(file))
+	description := "Detailed API documentation for MCP-UAPI eval scripting."
+	inFence := false
+	for _, line := range strings.Split(text, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "# ") {
+			title = strings.TrimSpace(strings.TrimPrefix(trimmed, "# "))
+			continue
+		}
+		if !strings.HasPrefix(trimmed, "#") {
+			description = strings.Trim(trimmed, " .") + "."
+			break
+		}
+	}
+	return title, description
+}
+
+func apiDocsIndexMarkdown() string {
+	var builder strings.Builder
+	builder.WriteString("# MCP-UAPI API Documents\n\n")
+	builder.WriteString("These API documents live in `docs/api/`, are embedded into the binary at build time, and are exposed as individual MCP resources. Read these before composing eval scripts for a specific subsystem.\n\n")
+	for _, resource := range primaryAPIResources() {
+		fmt.Fprintf(&builder, "- `%s` - %s", resource.URI, resource.Name)
+		if resource.Description != "" {
+			fmt.Fprintf(&builder, ": %s", resource.Description)
+		}
+		builder.WriteString("\n")
+	}
+	return builder.String()
+}
+
+func apiDocsIndexJSON() string {
+	resources := primaryAPIResources()
+	summaries := make([]ResourceSummary, 0, len(resources))
+	for _, resource := range resources {
+		summaries = append(summaries, ResourceSummary{URI: resource.URI, Name: resource.Name, Description: resource.Description, MIMEType: resource.MIMEType, SourcePath: resource.Path})
+	}
+	return mustJSON(summaries)
+}
+
+func primaryAPIResources() []embeddedResource {
+	resources := apiDocResources()
+	primary := make([]embeddedResource, 0, len(resources))
+	for _, resource := range resources {
+		if strings.HasPrefix(resource.URI, "uapi://api/") {
+			primary = append(primary, resource)
+		}
+	}
+	return primary
+}
+
 func exampleScripts() []ScriptingExample {
 	matches, err := fs.Glob(content.Content, "examples/*.js")
 	if err != nil {
@@ -219,6 +297,7 @@ func docsIndexMarkdown() string {
 	for _, doc := range documentAssets() {
 		fmt.Fprintf(&builder, "- `%s` - %s (`%s`)\n", doc.URI, doc.Name, doc.Path)
 	}
+	builder.WriteString("\nAPI-specific resources live under `uapi://api`; read `uapi://api/index.json` for a machine-readable list.\n")
 	return builder.String()
 }
 
@@ -246,12 +325,18 @@ func examplesIndexJSON() string {
 
 func documentationResourceSummaries() []ResourceSummary {
 	resources := documentResources()
-	summaries := make([]ResourceSummary, 0, len(resources)+2)
+	apiResources := apiDocResources()
+	summaries := make([]ResourceSummary, 0, len(resources)+len(apiResources)+4)
 	summaries = append(summaries,
 		ResourceSummary{URI: "uapi://docs", Name: "MCP-UAPI documentation index", Description: "Human-readable index of embedded documentation resources.", MIMEType: mimeMarkdown},
 		ResourceSummary{URI: "uapi://docs/index.json", Name: "MCP-UAPI documentation index JSON", Description: "Machine-readable index of embedded documentation resources.", MIMEType: mimeJSON},
+		ResourceSummary{URI: "uapi://api", Name: "MCP-UAPI API document index", Description: "Human-readable index of embedded per-API documentation resources.", MIMEType: mimeMarkdown},
+		ResourceSummary{URI: "uapi://api/index.json", Name: "MCP-UAPI API document index JSON", Description: "Machine-readable index of embedded per-API documentation resources.", MIMEType: mimeJSON},
 	)
 	for _, resource := range resources {
+		summaries = append(summaries, ResourceSummary{URI: resource.URI, Name: resource.Name, Description: resource.Description, MIMEType: resource.MIMEType, SourcePath: resource.Path})
+	}
+	for _, resource := range apiResources {
 		summaries = append(summaries, ResourceSummary{URI: resource.URI, Name: resource.Name, Description: resource.Description, MIMEType: resource.MIMEType, SourcePath: resource.Path})
 	}
 	return summaries

@@ -9,9 +9,10 @@ Use the MCP client's resource APIs before calling `eval`:
 1. Read MCP resource `uapi://agent-guide` for this orientation.
 2. Read MCP resource `uapi://scripting-api` for JavaScript globals, wrapper groups, and examples.
 3. Read MCP resource `uapi://api-reference` for result conventions, handles, constants, and workflow notes.
-4. Read MCP resource `uapi://examples` for reusable eval scripts, and `uapi://examples/index.json` when a machine-readable index is easier.
-5. Read MCP resource `uapi://capabilities` when you need machine-readable wrapper names, constants, prompts, resources, docs, and example-script metadata.
-6. Call MCP tool `eval` for syscall workflows.
+4. Read MCP resource `uapi://api` for API-specific documents, and `uapi://api/index.json` when a machine-readable index is easier.
+5. Read MCP resource `uapi://examples` for reusable eval scripts, and `uapi://examples/index.json` when a machine-readable index is easier.
+6. Read MCP resource `uapi://capabilities` when you need machine-readable wrapper names, constants, prompts, resources, docs, and example-script metadata.
+7. Call MCP tool `eval` for syscall workflows.
 
 Do not try to fetch MCP resources from inside JavaScript. These are wrong and will fail because they are not part of the eval runtime:
 
@@ -101,3 +102,7 @@ Raw integer FDs require the server to be started with `--allow-raw-fd`. Prefer m
 ## Reusable Examples
 
 Reusable eval scripts live in the repository under `examples/*.js`, are embedded into the binary at build time, and are exposed as MCP resources under `uapi://examples/<file>.js`. Start with `uapi://examples` for the human-readable index or `uapi://examples/index.json` for metadata.
+
+## API Documents
+
+API-specific documentation lives under `uapi://api`. Start with `uapi://api` for the index, then read resources such as `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, and `uapi://api/sys-unix-process-memory` for wrapper parameters, relevant constants, and copy-ready examples.

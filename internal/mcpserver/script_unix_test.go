@@ -1,7 +1,12 @@
 package mcpserver
 
 import (
+	"bufio"
+	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -117,6 +122,120 @@ return {eventfd, pipe, pipeRead, nonblock, src, dst, copied, copiedRead, state: 
 	state := nestedMap(t, value, "state")
 	if fds, ok := state["fds"].([]any); ok && len(fds) != 0 {
 		t.Fatalf("expected eval script to close managed fds, state=%#v", state)
+	}
+}
+
+func TestEvalAdditionalUnixVectorAndProcessAPI(t *testing.T) {
+	app, _ := New(Config{})
+	defer app.Close()
+
+	resp, result := callEvalForTest(t, app, map[string]any{"script": `
+const fd = sys.memfdCreate({name: "vec", flags: "MFD_CLOEXEC", handle: "vec"});
+let writev = null;
+let preadv = null;
+let fallocate = null;
+let fadvise = null;
+if (fd.ok) {
+  writev = sys.writev({handle: "vec", iovecs: [{data_utf8: "hello "}, {data_hex: "776f726c64"}]});
+  preadv = sys.preadv({handle: "vec", offset: 0, iovecs: [{length: 6}, {length: 5}], encoding: "utf8"});
+  fallocate = sys.fallocate({handle: "vec", offset: 0, length: 4096});
+  fadvise = sys.fadvise({handle: "vec", offset: 0, length: 4096, advice: "FADV_SEQUENTIAL"});
+  sys.close({handle: "vec"});
+}
+
+const ids = sys.getids();
+const page = sys.getpagesize();
+const clock = sys.clockGettime({clockid: "CLOCK_MONOTONIC"});
+const rlimit = sys.prlimit({pid: 0, resource: "RLIMIT_NOFILE"});
+const random = sys.getrandom({length: 4, flags: "GRND_NONBLOCK", encoding: "hex"});
+const pidfd = sys.pidfdOpen({pid: ids.pid, handle: "selfPid"});
+if (pidfd.ok) sys.close({handle: "selfPid"});
+const rawGetpid = sys.syscall({trap: "SYS_GETPID"});
+return {fd, writev, preadv, fallocate, fadvise, ids, page, clock, rlimit, random, pidfd, rawGetpid, state: sys.state()};
+`})
+	if result.IsError || !resp.OK {
+		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
+	}
+	value := resp.Result.(map[string]any)
+	fd := nestedMap(t, value, "fd")
+	if fd["ok"] != true {
+		if knownUnsupportedSyscall(fd) {
+			t.Skipf("memfdCreate unsupported by kernel policy: %#v", fd)
+		}
+		t.Fatalf("memfdCreate failed unexpectedly: %#v", fd)
+	}
+	for _, key := range []string{"writev", "preadv", "fallocate", "fadvise", "ids", "page", "clock", "rlimit", "random", "rawGetpid"} {
+		requireNestedOK(t, value, key)
+	}
+	if got := nestedMap(t, value, "preadv")["data_utf8"]; got != "hello world" {
+		t.Fatalf("preadv data = %#v", got)
+	}
+	pidfd := nestedMap(t, value, "pidfd")
+	if pidfd["ok"] != true && !knownUnsupportedSyscall(pidfd) {
+		t.Fatalf("pidfdOpen failed unexpectedly: %#v", pidfd)
+	}
+	state := nestedMap(t, value, "state")
+	if fds, ok := state["fds"].([]any); ok && len(fds) != 0 {
+		t.Fatalf("expected eval script to close managed fds, state=%#v", state)
+	}
+}
+
+func TestEvalProcessVMReadvChildMemory(t *testing.T) {
+	app, _ := New(Config{})
+	defer app.Close()
+
+	cmd := exec.Command(os.Args[0])
+	cmd.Env = append(cmd.Environ(), "MCP_UAPI_PTRACE_HELPER=1")
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("stdout pipe: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	scanner := bufio.NewScanner(stdout)
+	if !scanner.Scan() {
+		t.Fatalf("helper did not print pid/address: %v", scanner.Err())
+	}
+	parts := strings.Fields(scanner.Text())
+	if len(parts) != 2 {
+		t.Fatalf("helper line = %q", scanner.Text())
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil {
+		t.Fatalf("parse pid: %v", err)
+	}
+	addr, err := strconv.ParseUint(strings.TrimPrefix(parts[1], "0x"), 16, 64)
+	if err != nil {
+		t.Fatalf("parse address: %v", err)
+	}
+	if !scanner.Scan() || scanner.Text() != "ready" {
+		t.Fatalf("helper not ready")
+	}
+
+	resp, result := callEvalForTest(t, app, map[string]any{"script": `
+return sys.processVMReadv({pid: args.pid, address: args.address, length: 20, encoding: "utf8"});
+`, "args": map[string]any{"pid": pid, "address": fmt.Sprintf("0x%x", addr)}})
+	if result.IsError || !resp.OK {
+		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
+	}
+	read, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("processVMReadv result = %#v", resp.Result)
+	}
+	if read["ok"] != true {
+		if errno := stringField(t, read, "errno_name"); errno == "EPERM" || errno == "EACCES" || errno == "ENOSYS" {
+			t.Skipf("process_vm_readv denied or unavailable: %#v", read)
+		}
+		t.Fatalf("processVMReadv failed unexpectedly: %#v", read)
+	}
+	if got := stringField(t, read, "data_utf8"); got != "mcp-uapi-ptrace-test" {
+		t.Fatalf("processVMReadv = %q", got)
 	}
 }
 
