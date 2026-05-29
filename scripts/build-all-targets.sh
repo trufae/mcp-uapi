@@ -5,20 +5,20 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/build-target.sh"
 
 TARGETS=(
-  aix/ppc64
+  # aix/ppc64 — unsupported
 
-  darwin/amd64
-  darwin/arm64
+  # darwin/amd64 — unsupported
+  # darwin/arm64 — unsupported
 
-  dragonfly/amd64
+  # dragonfly/amd64 — unsupported
 
-  freebsd/386
-  freebsd/amd64
-  freebsd/arm
-  freebsd/arm64
-  freebsd/riscv64
+  # freebsd/386 — unsupported
+  # freebsd/amd64 — unsupported
+  # freebsd/arm — unsupported
+  # freebsd/arm64 — unsupported
+  # freebsd/riscv64 — unsupported
 
-  illumos/amd64
+  # illumos/amd64 — unsupported
 
   linux/386
   linux/amd64
@@ -34,20 +34,20 @@ TARGETS=(
   linux/riscv64
   linux/s390x
 
-  netbsd/386
-  netbsd/amd64
-  netbsd/arm
-  netbsd/arm64
+  # netbsd/386 — unsupported
+  # netbsd/amd64 — unsupported
+  # netbsd/arm — unsupported
+  # netbsd/arm64 — unsupported
 
-  openbsd/386
-  openbsd/amd64
-  openbsd/arm
-  openbsd/arm64
-  openbsd/mips64
-  openbsd/ppc64
-  openbsd/riscv64
+  # openbsd/386 — unsupported
+  # openbsd/amd64 — unsupported
+  # openbsd/arm — unsupported
+  # openbsd/arm64 — unsupported
+  # openbsd/mips64 — unsupported
+  # openbsd/ppc64 — unsupported
+  # openbsd/riscv64 — unsupported
 
-  solaris/amd64
+  # solaris/amd64 — unsupported
 )
 
 FAILED=()
