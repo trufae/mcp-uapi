@@ -19,7 +19,7 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - `ioctl`: integer argument or pointer to a managed buffer range.
 - `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*` wrappers, captured logs, timeout enforcement, and JSON results.
 
-Agents should read `uapi://capabilities` and `uapi://scripting-api` immediately after connecting. The capability document includes bootstrap hints, constants, resources, prompts, and scripting metadata.
+Agents should read MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, or `fetch`.
 
 ## Safety Model
 

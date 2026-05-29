@@ -19,11 +19,16 @@ type CapabilityDocument struct {
 }
 
 type ClientBootstrapInfo struct {
-	RecommendedFirstCalls []string `json:"recommended_first_calls"`
-	ScriptingAPIResource  string   `json:"scripting_api_resource"`
-	ScriptingPrompt       string   `json:"scripting_prompt"`
-	SafeEvalProbe         string   `json:"safe_eval_probe"`
-	Notes                 []string `json:"notes"`
+	RecommendedFirstCalls []string       `json:"recommended_first_calls"`
+	AgentGuideResource    string         `json:"agent_guide_resource"`
+	ScriptingAPIResource  string         `json:"scripting_api_resource"`
+	APIReferenceResource  string         `json:"api_reference_resource"`
+	ResourceAccess        string         `json:"resource_access"`
+	ScriptingPrompt       string         `json:"scripting_prompt"`
+	SafeEvalProbe         string         `json:"safe_eval_probe"`
+	EvalToolExample       map[string]any `json:"eval_tool_example"`
+	DoNotUse              []string       `json:"do_not_use"`
+	Notes                 []string       `json:"notes"`
 }
 
 type PrimitiveGroup struct {
@@ -45,6 +50,8 @@ type ScriptingAPIInfo struct {
 	Engine         string             `json:"engine"`
 	ExecutionModel string             `json:"execution_model"`
 	Globals        []ScriptGlobalInfo `json:"globals"`
+	NotAvailable   []string           `json:"not_available"`
+	Conventions    []string           `json:"conventions"`
 	UAPIWrappers   []string           `json:"uapi_wrappers"`
 	Limits         map[string]any     `json:"limits"`
 	ResultShape    map[string]string  `json:"result_shape"`
@@ -68,12 +75,24 @@ func Capabilities() CapabilityDocument {
 		Purpose:    "Expose Linux user-mode APIs from golang.org/x/sys/unix through a single JavaScript eval scripting layer for embedded testing, reconnaissance, and proof-of-concept development.",
 		Transports: []string{"stdio", "streamable-http"},
 		ClientBootstrap: ClientBootstrapInfo{
-			RecommendedFirstCalls: []string{"read resource uapi://capabilities", "read resource uapi://scripting-api before eval", "call eval for all syscall workflows", "read resource uapi://state when reusing handles"},
+			RecommendedFirstCalls: []string{"MCP resources/read uapi://agent-guide", "MCP resources/read uapi://scripting-api", "MCP resources/read uapi://api-reference", "MCP resources/read uapi://capabilities", "MCP tools/call eval for all syscall workflows", "MCP resources/read uapi://state when reusing handles"},
+			AgentGuideResource:    "uapi://agent-guide",
 			ScriptingAPIResource:  "uapi://scripting-api",
+			APIReferenceResource:  "uapi://api-reference",
+			ResourceAccess:        "Resources are MCP resources read by the client with the MCP resources/read operation. They are not available from JavaScript eval; there is no uapi.request, sys.request, fetch, HTTP client, require, or import inside the eval runtime.",
 			ScriptingPrompt:       "uapi_eval_quickstart",
 			SafeEvalProbe:         `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers, uname: sys.uname(), openFlags: sys.constants({group:"open_flags"}).constants};`,
+			EvalToolExample: map[string]any{
+				"name": "eval",
+				"arguments": map[string]any{
+					"script": `const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers.length, uname: sys.uname()};`,
+				},
+			},
+			DoNotUse: []string{"uapi.request('GET', 'uapi://capabilities')", "sys.request('GET', 'uapi://capabilities')", "fetch('uapi://capabilities')", "calling uapi_* as public MCP tools"},
 			Notes: []string{
 				"The only public MCP tool is eval; syscall functionality is available inside the JavaScript sys/uapi object.",
+				"Read uapi://agent-guide, uapi://scripting-api, and uapi://api-reference through MCP resource APIs before composing nontrivial eval scripts.",
+				"Inside eval, use sys.capabilities() for the same machine-readable capability document; do not try to read MCP resources from JavaScript.",
 				"All handles returned by scripts are process-local to this MCP server instance.",
 				"Syscall errno results are returned as structured data with ok=false instead of MCP tool errors.",
 				"Use string constants such as O_RDWR|O_CREAT, AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, PROT_READ|PROT_WRITE, AT_FDCWD, and EPOLLIN where schemas accept integer|string.",
@@ -100,10 +119,10 @@ func Capabilities() CapabilityDocument {
 		},
 		Constants:      constantCatalog(),
 		Tools:          toolSummaries(),
-		Resources:      []string{"uapi://capabilities", "uapi://api-reference", "uapi://scripting-api", "uapi://state"},
+		Resources:      []string{"uapi://agent-guide", "uapi://capabilities", "uapi://api-reference", "uapi://scripting-api", "uapi://state"},
 		Prompts:        []string{"uapi_recon_quickstart", "uapi_eval_quickstart", "uapi_ptrace_memory_probe", "uapi_socket_fuzzing"},
 		ScriptingAPI:   scriptingAPIInfo(),
-		Implementation: []string{"The public MCP surface registers only eval; resources and prompts remain available for discovery.", "The scripting layer keeps FD, buffer, and mmap lifetime in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "Goja eval creates a fresh runtime per call and exposes sys and uapi aliases for synchronous Unix workflows."},
+		Implementation: []string{"The public MCP tool surface registers only eval; MCP resources and prompts remain available for discovery and documentation.", "MCP resource reads happen outside eval through the client; the JavaScript runtime intentionally has no uapi.request, sys.request, fetch, require, or import helpers.", "The scripting layer keeps FD, buffer, and mmap lifetime in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "Goja eval creates a fresh runtime per call and exposes sys and uapi aliases for synchronous Unix workflows."},
 	}
 }
 
@@ -114,6 +133,8 @@ func scriptingAPIInfo() ScriptingAPIInfo {
 		Engine:         "Goja (github.com/dop251/goja)",
 		ExecutionModel: "Each eval call runs a fresh synchronous JavaScript runtime inside a function body; use return for JSON results and console.* for captured logs.",
 		Globals:        []ScriptGlobalInfo{{"args", "Caller-provided JSON object."}, {"console", "Captured log/info/warn/error functions returned in the eval response."}, {"print", "Alias for console.log."}, {"sys", "Synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers."}, {"uapi", "Alias for sys for compatibility with older scripts."}},
+		NotAvailable:   []string{"uapi.request", "sys.request", "fetch", "XMLHttpRequest", "require", "import", "Node.js fs/net modules", "direct MCP resource reads from inside eval", "public uapi_* MCP tool calls"},
+		Conventions:    []string{"Call MCP resources/read outside eval for uapi://agent-guide, uapi://scripting-api, and uapi://api-reference.", "Call the MCP tool named eval with an object containing script, optional args, timeout_ms, max_log_entries, and max_result_bytes.", "Inside scripts, use sys.* or uapi.* only; sys and uapi are the same object.", "Every syscall-style helper returns ok=true on success or ok=false with errno fields for Linux errno failures.", "Close managed FDs and mappings explicitly with sys.close and sys.munmap when a script creates them."},
 		UAPIWrappers:   scriptWrapperNames(),
 		Limits:         map[string]any{"default_timeout_ms": defaultEvalTimeoutMS, "max_timeout_ms": maxEvalTimeoutMS, "default_max_log_entries": defaultEvalLogEntries, "max_log_entries": maxEvalLogEntries},
 		ResultShape:    map[string]string{"ok": "true on successful script execution", "result": "JSON value returned by the script", "logs": "captured console entries", "operations": "number of sys/uapi wrapper calls", "error": "script or argument error string when ok=false"},

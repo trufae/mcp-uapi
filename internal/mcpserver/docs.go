@@ -1,9 +1,146 @@
 package mcpserver
 
+func agentGuideMarkdown() string {
+	return `# MCP-UAPI Agent Guide
+
+This server is intentionally eval-first. The only public MCP tool to call is ` + "`eval`" + `. Discovery documents, references, and prompts are still exposed as MCP resources and prompts so a new agent can learn the API before it writes a script.
+
+## Correct Bootstrap
+
+Use the MCP client's resource APIs before calling ` + "`eval`" + `:
+
+1. Read MCP resource ` + "`uapi://agent-guide`" + ` for this orientation.
+2. Read MCP resource ` + "`uapi://scripting-api`" + ` for JavaScript globals, wrapper groups, and examples.
+3. Read MCP resource ` + "`uapi://api-reference`" + ` for result conventions, handles, constants, and workflow notes.
+4. Read MCP resource ` + "`uapi://capabilities`" + ` when you need machine-readable wrapper names, constants, prompts, and resources.
+5. Call MCP tool ` + "`eval`" + ` for every syscall workflow.
+
+Do not try to fetch resources from inside JavaScript. These are wrong and will fail because they are not part of the eval runtime:
+
+` + "```javascript" + `
+uapi.request('GET', 'uapi://capabilities')
+sys.request('GET', 'uapi://capabilities')
+fetch('uapi://capabilities')
+require('fs')
+` + "```" + `
+
+Inside eval, use ` + "`sys.capabilities()`" + ` for the same machine-readable capability document after the resource-reading phase.
+
+## Eval Tool Shape
+
+Call the MCP tool named ` + "`eval`" + ` with this envelope:
+
+` + "```json" + `
+{
+  "name": "eval",
+  "arguments": {
+    "script": "const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers.length};",
+    "args": {},
+    "timeout_ms": 5000,
+    "max_log_entries": 200,
+    "max_result_bytes": 1048576
+  }
+}
+` + "```" + `
+
+Scripts run inside a function body. Use ` + "`return`" + ` for the JSON result. Logs written with ` + "`console.log/info/warn/error`" + ` or ` + "`print`" + ` are captured in the eval response.
+
+## Eval Runtime
+
+Available globals:
+
+- ` + "`args`" + `: caller-provided JSON object.
+- ` + "`console`" + ` and ` + "`print`" + `: captured logging.
+- ` + "`sys`" + `: synchronous Linux sys/unix scripting API.
+- ` + "`uapi`" + `: alias for ` + "`sys`" + ` for older scripts.
+
+Not available in eval: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, Node.js modules, direct network clients, and direct MCP resource reads.
+
+## Discovery Probe
+
+Use this as the first read-only eval script:
+
+` + "```javascript" + `
+const caps = sys.capabilities();
+return {
+  name: caps.name,
+  publicTools: caps.tools.map(t => t.name),
+  resources: caps.resources,
+  wrappers: caps.scripting_api.uapi_wrappers,
+  constants: Object.keys(sys.constants().constants),
+  uname: sys.uname()
+};
+` + "```" + `
+
+Expected public tools: only ` + "`eval`" + `. Expected scripting object: ` + "`sys`" + `, with ` + "`uapi`" + ` as the same object.
+
+## Result Model
+
+Eval responses have ` + "`ok`" + `, ` + "`result`" + `, ` + "`logs`" + `, ` + "`operations`" + `, timing fields, and optional ` + "`error`" + `. Malformed script inputs, unknown handles, invalid ranges, bad constants, and result-size violations are eval errors. Linux errno failures are data returned by syscall wrappers:
+
+` + "```json" + `
+{"ok": false, "errno": 2, "errno_name": "ENOENT", "error": "no such file or directory"}
+` + "```" + `
+
+Treat ` + "`ok:false`" + ` errno values as observations during probing rather than crashes.
+
+## Handle Discipline
+
+Helpers that create FDs, buffers, and mappings return managed names. Reuse those names within later eval calls, and read ` + "`uapi://state`" + ` through MCP resources when you need a live inventory. Close what you create:
+
+- FDs: ` + "`sys.close({handle})`" + `.
+- Mappings: ` + "`sys.munmap({mapping})`" + `.
+- Buffers: ` + "`sys.bufferFree({name})`" + `.
+
+Raw integer FDs require the server to be started with ` + "`--allow-raw-fd`" + `. Prefer managed handles.
+
+## Common Patterns
+
+File read:
+
+` + "```javascript" + `
+const fd = sys.open({path: args.path, flags: "O_RDONLY|O_CLOEXEC"});
+try {
+  return sys.read({handle: fd.handle, length: args.length || 4096, encoding: "utf8"});
+} finally {
+  sys.close({handle: fd.handle});
+}
+` + "```" + `
+
+Socketpair round trip:
+
+` + "```javascript" + `
+const pair = sys.socketpair({type: "SOCK_STREAM|SOCK_CLOEXEC", handles: ["left", "right"]});
+try {
+  sys.write({handle: "left", data_utf8: "ping"});
+  const ready = sys.poll({fds: [{handle: "right", events: "POLLIN"}], timeout_ms: 100});
+  const got = sys.read({handle: "right", length: 4, encoding: "utf8"});
+  return {ready, got};
+} finally {
+  sys.close({handle: "left"});
+  sys.close({handle: "right"});
+}
+` + "```" + `
+
+Ioctl with a managed buffer:
+
+` + "```javascript" + `
+sys.bufferAlloc({name: "argp", size: 8, replace_existing: true});
+const ioctl = sys.ioctl({handle: args.handle, request: "FIONREAD", buffer: "argp", buffer_length: 4});
+const argp = sys.bufferRead({name: "argp", length: 4, encoding: "hex"});
+return {ioctl, argp};
+` + "```" + `
+
+Use ` + "`sys.constants({group: 'open_flags'})`" + `, ` + "`sys.constant('O_CLOEXEC')`" + `, and ` + "`sys.errno({name:'ENOENT'})`" + ` when constructing portable scripts.
+`
+}
+
 func apiReferenceMarkdown() string {
 	return `# Linux UAPI API Reference
 
-Agents should begin by reading ` + "`uapi://capabilities`" + ` and ` + "`uapi://scripting-api`" + `. The only public MCP tool is ` + "`eval`" + `; all Linux UAPI operations are available inside eval through the ` + "`sys`" + ` object, with ` + "`uapi`" + ` kept as an alias for older scripts. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
+Agents should begin by reading MCP resources ` + "`uapi://agent-guide`" + `, ` + "`uapi://capabilities`" + `, and ` + "`uapi://scripting-api`" + ` through the MCP client resource API. The only public MCP tool is ` + "`eval`" + `; all Linux UAPI operations are available inside eval through the ` + "`sys`" + ` object, with ` + "`uapi`" + ` kept as an alias for older scripts. Numeric fields accept JSON numbers, decimal strings, hex strings, or constant expressions such as ` + "`O_RDWR|O_CREAT|O_CLOEXEC`" + `.
+
+MCP resources are not readable from JavaScript. Do not call ` + "`uapi.request('GET', 'uapi://capabilities')`" + `, ` + "`sys.request`" + `, or ` + "`fetch`" + ` inside eval. Use ` + "`sys.capabilities()`" + ` inside eval when a script needs the capability document.
 
 ## Result Model
 
@@ -36,6 +173,8 @@ func scriptingAPIMarkdown() string {
 
 The ` + "`eval`" + ` tool executes JavaScript with Goja. Scripts run inside a function body, so use ` + "`return`" + ` to produce JSON. ` + "`console.log/info/warn/error`" + ` output is captured in the response.
 
+Before calling eval, read MCP resources ` + "`uapi://agent-guide`" + `, ` + "`uapi://scripting-api`" + `, and ` + "`uapi://api-reference`" + ` with the MCP client resource API. Do not try to read those resources from JavaScript: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`require`" + `, and ` + "`import`" + ` are not available in the eval runtime.
+
 Input shape:
 
 ` + "```json" + `
@@ -54,6 +193,8 @@ Globals:
 - ` + "`console`" + ` and ` + "`print`" + `: captured logging.
 - ` + "`sys`" + `: synchronous Linux sys/unix scripting API with managed FD, buffer, mmap, socket, process, xattr, and event helpers.
 - ` + "`uapi`" + `: alias for ` + "`sys`" + ` for compatibility with older scripts.
+
+Not globals: ` + "`uapi.request`" + `, ` + "`sys.request`" + `, ` + "`fetch`" + `, ` + "`XMLHttpRequest`" + `, ` + "`require`" + `, ` + "`import`" + `, or Node.js modules. Resource reading happens at the MCP client layer, not inside eval.
 
 Safe bootstrap:
 

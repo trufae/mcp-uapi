@@ -2,6 +2,8 @@
 
 `eval` is the only public MCP tool. It runs JavaScript in a fresh Goja runtime for each call. Scripts execute inside a function body, so use `return` for the JSON result. Console output is captured and returned with the eval response.
 
+Before eval, agents should read MCP resources `uapi://agent-guide`, `uapi://scripting-api`, `uapi://api-reference`, and `uapi://capabilities` through the MCP client resource API. Those resources are not JavaScript URLs. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval.
+
 ```json
 {
   "script": "const caps = sys.capabilities(); return {name: caps.name, uname: sys.uname()};",
@@ -18,6 +20,8 @@ Globals:
 - `console.log/info/warn/error` and `print`: captured logs.
 - `sys`: synchronous Linux `golang.org/x/sys/unix` scripting API plus managed handle helpers.
 - `uapi`: alias for `sys` for compatibility with older scripts.
+
+Not globals: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, or Node.js modules. Inside eval, use `sys.capabilities()` for the same machine-readable capability data that is served as `uapi://capabilities`.
 
 Safe discovery probe:
 

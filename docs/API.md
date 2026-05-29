@@ -1,6 +1,20 @@
 # API Reference
 
-Start with `uapi://capabilities` and `uapi://scripting-api`. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, and mappings inside the JavaScript `sys`/`uapi` scripting API so agents do not need to juggle raw integer FDs.
+Start by reading MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` with the MCP client resource-read operation. The only public MCP tool is `eval`; the server exposes process-local handles for FDs, buffers, and mappings inside the JavaScript `sys`/`uapi` scripting API so agents do not need to juggle raw integer FDs.
+
+MCP resources are documentation and discovery surfaces outside the eval runtime. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval. Use `sys.capabilities()` inside eval when a script needs the machine-readable capability document.
+
+Correct eval tool envelope:
+
+```json
+{
+	"name": "eval",
+	"arguments": {
+		"script": "const caps = sys.capabilities(); return {name: caps.name, wrappers: caps.scripting_api.uapi_wrappers.length};",
+		"args": {}
+	}
+}
+```
 
 ## Result Model
 

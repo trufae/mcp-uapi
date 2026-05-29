@@ -324,7 +324,7 @@ const schemaPrctl = `{
 
 const schemaEval = `{
   "type":"object",
-  "description":"Execute JavaScript inside a function body. Discover the full scripting API at uapi://scripting-api or in the capabilities resource.",
+  "description":"Execute JavaScript inside a function body. Read MCP resources uapi://agent-guide, uapi://scripting-api, and uapi://api-reference outside eval. Inside eval use sys.* or uapi.*; uapi.request, sys.request, fetch, require, and import are not available.",
   "additionalProperties":false,
   "properties":{"script":{"type":"string","description":"JavaScript source. Globals: args, console, print, sys, uapi."},"args":{"type":"object"},"timeout_ms":{"type":["integer","string"],"default":5000},"max_log_entries":{"type":["integer","string"],"default":200},"max_result_bytes":{"type":["integer","string"]}},
   "required":["script"]

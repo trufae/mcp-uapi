@@ -1,5 +1,7 @@
 # Examples
 
+Read MCP resources such as `uapi://agent-guide` and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`; helpers such as `uapi.request`, `sys.request`, and `fetch` are not available.
+
 ## Read A File
 
 ```json

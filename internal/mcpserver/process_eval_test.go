@@ -44,13 +44,13 @@ sys.write({handle:"evalA", data_utf8:"ok"});
 const read = sys.read({handle:"evalB", length:2, encoding:"utf8"});
 sys.close({handle:"evalA"});
 sys.close({handle:"evalB"});
-return {name:sys.capabilities().name, read:read.data_utf8, rngType:typeof rng, callToolType:typeof sys.callTool, sameAlias:sys === uapi, fixed:sys.hex(255,4)};
+return {name:sys.capabilities().name, read:read.data_utf8, rngType:typeof rng, callToolType:typeof sys.callTool, requestType:typeof sys.request, uapiRequestType:typeof uapi.request, fetchType:typeof fetch, sameAlias:sys === uapi, fixed:sys.hex(255,4)};
 `, "args": map[string]any{"name": "eval"}})
 	if result.IsError || !resp.OK {
 		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
 	}
 	value := resp.Result.(map[string]any)
-	if value["name"] != "mcp-uapi" || value["read"] != "ok" || value["rngType"] != "undefined" || value["callToolType"] != "undefined" || value["sameAlias"] != true || value["fixed"] != "0x00ff" {
+	if value["name"] != "mcp-uapi" || value["read"] != "ok" || value["rngType"] != "undefined" || value["callToolType"] != "undefined" || value["requestType"] != "undefined" || value["uapiRequestType"] != "undefined" || value["fetchType"] != "undefined" || value["sameAlias"] != true || value["fixed"] != "0x00ff" {
 		t.Fatalf("unexpected eval result: %#v", value)
 	}
 }

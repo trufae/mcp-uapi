@@ -9,7 +9,7 @@ import (
 
 func toolSummaryRegistry() []toolSpec {
 	return []toolSpec{
-		{"eval", "Execute JavaScript with the sys/uapi scripting layer, captured logs, timeout enforcement, and JSON return values.", schemaEval, false, true, nil},
+		{"eval", "Execute JavaScript with the sys/uapi scripting layer. Read MCP resources outside eval; inside scripts use sys.* or uapi.* only, with no uapi.request/fetch helper.", schemaEval, false, true, nil},
 	}
 }
 
