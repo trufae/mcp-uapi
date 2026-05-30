@@ -38,7 +38,7 @@ return {
 - `socket_filter_drop`: socket filter that drops packets, return value `0`.
 - `counter`: increments an 8-byte value in a 4-byte-key counter map each time the program runs.
 - `perf_event`: writes a 16-byte event (`u64 ktime_ns; u64 pid_tgid`) to a `PerfEventArray` map.
-- `ringbuf_event`: writes the same 16-byte event to a `RingBuf` map.
+- `ringbuf_event`: writes the same 16-byte event to a `RingBuf` map. When `pidns_dev` and `pidns_ino` are supplied, it writes a 24-byte event with an extra `u64 ns_pid_tgid` field from `bpf_get_ns_current_pid_tgid`.
 
 The `counter`, `perf_event`, and `ringbuf_event` kinds are intended for monitoring hooks such as kprobes, kretprobes, tracepoints, raw tracepoints, and XDP where the selected program type is valid for the chosen attach point.
 
@@ -91,6 +91,20 @@ const prog = sys.ebpfProgramLoad({handle: "emit", type: "kprobe", kind: "ringbuf
 if (!prog.ok) return prog;
 const link = sys.ebpfAttachKprobe({handle: "emitLink", program: "emit", symbol: "do_sys_openat2"});
 return {ring, reader, prog, link};
+```
+
+For process monitoring from a PID namespace, pass the stat fields from `/proc/self/ns/pid` so `ebpfRingbufRead` also returns `ns_pid`, `ns_tid`, and `ns_pid_tgid` values that can be used with that namespace's `/proc` mount:
+
+```javascript
+const ns = os.stat({name: "/proc/self/ns/pid"});
+const prog = sys.ebpfProgramLoad({
+  handle: "emit",
+  type: "tracepoint",
+  kind: "ringbuf_event",
+  event_map: "events",
+  pidns_dev: ns.info.stat.dev,
+  pidns_ino: ns.info.stat.ino
+});
 ```
 
 Read events without blocking indefinitely. A `timeout_ms` of `0` performs a nonblocking poll:

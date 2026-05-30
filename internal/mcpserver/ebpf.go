@@ -159,6 +159,8 @@ type ebpfProgramLoadArgs struct {
 	CounterMap   string      `json:"counter_map"`
 	CounterKey   any         `json:"counter_key"`
 	EventMap     string      `json:"event_map"`
+	PidNSDev     Uint64      `json:"pidns_dev"`
+	PidNSIno     Uint64      `json:"pidns_ino"`
 	LogLevel     ConstUint64 `json:"log_level"`
 	LogSizeStart Uint32      `json:"log_size_start"`
 	LogDisabled  bool        `json:"log_disabled"`
@@ -1376,6 +1378,12 @@ func addEBPFEventFields(fields map[string]any, data []byte) {
 	fields["pid_tgid"] = pidTGID
 	fields["pid"] = uint32(pidTGID >> 32)
 	fields["tid"] = uint32(pidTGID)
+	if len(data) >= 24 {
+		nsPidTGID := binary.NativeEndian.Uint64(data[16:24])
+		fields["ns_pid_tgid"] = nsPidTGID
+		fields["ns_pid"] = uint32(nsPidTGID >> 32)
+		fields["ns_tid"] = uint32(nsPidTGID)
+	}
 }
 
 func (e *scriptEnv) scriptEBPFRemoveMemlock(value goja.Value) (any, error) {
@@ -1482,7 +1490,7 @@ func parseASMHelper(value any) (asm.BuiltinFunc, error) {
 func asmHelpersByName() map[string]asm.BuiltinFunc {
 	return map[string]asm.BuiltinFunc{
 		"map_lookup_elem": asm.FnMapLookupElem, "map_update_elem": asm.FnMapUpdateElem, "map_delete_elem": asm.FnMapDeleteElem,
-		"ktime_get_ns": asm.FnKtimeGetNs, "get_current_pid_tgid": asm.FnGetCurrentPidTgid, "get_current_uid_gid": asm.FnGetCurrentUidGid, "get_current_comm": asm.FnGetCurrentComm,
+		"ktime_get_ns": asm.FnKtimeGetNs, "get_current_pid_tgid": asm.FnGetCurrentPidTgid, "get_ns_current_pid_tgid": asm.FnGetNsCurrentPidTgid, "get_current_uid_gid": asm.FnGetCurrentUidGid, "get_current_comm": asm.FnGetCurrentComm,
 		"perf_event_output": asm.FnPerfEventOutput, "ringbuf_output": asm.FnRingbufOutput, "ringbuf_reserve": asm.FnRingbufReserve, "ringbuf_submit": asm.FnRingbufSubmit, "ringbuf_discard": asm.FnRingbufDiscard,
 		"get_smp_processor_id": asm.FnGetSmpProcessorId, "get_prandom_u32": asm.FnGetPrandomU32, "probe_read_kernel": asm.FnProbeReadKernel, "probe_read_user": asm.FnProbeReadUser,
 	}
@@ -2383,9 +2391,18 @@ func (e *scriptEnv) ebpfRingbufEventInstructions(args ebpfProgramLoadArgs, retur
 	if entry.Map.Type() != cebpf.RingBuf {
 		return nil, nil, fmt.Errorf("event_map %q must be a RingBuf", args.EventMap)
 	}
+	pidNSDev := uint64(args.PidNSDev)
+	pidNSIno := uint64(args.PidNSIno)
+	usePidNS := pidNSDev != 0 && pidNSIno != 0
+	eventSize := int32(16)
+	eventFormat := "u64 ktime_ns; u64 pid_tgid"
+	if usePidNS {
+		eventSize = 24
+		eventFormat = "u64 ktime_ns; u64 pid_tgid; u64 ns_pid_tgid"
+	}
 	insns := asm.Instructions{
 		asm.LoadMapPtr(asm.R1, entry.Map.FD()),
-		asm.Mov.Imm(asm.R2, 16),
+		asm.Mov.Imm(asm.R2, eventSize),
 		asm.Mov.Imm(asm.R3, 0),
 		asm.FnRingbufReserve.Call(),
 		asm.JEq.Imm(asm.R0, 0, "exit"),
@@ -2394,13 +2411,39 @@ func (e *scriptEnv) ebpfRingbufEventInstructions(args ebpfProgramLoadArgs, retur
 		asm.StoreMem(asm.R6, 0, asm.R0, asm.DWord),
 		asm.FnGetCurrentPidTgid.Call(),
 		asm.StoreMem(asm.R6, 8, asm.R0, asm.DWord),
-		asm.Mov.Reg(asm.R1, asm.R6),
+	}
+	if usePidNS {
+		insns = append(insns,
+			asm.Mov.Imm(asm.R7, 0),
+			asm.StoreMem(asm.R6, 16, asm.R7, asm.DWord),
+			asm.StoreMem(asm.R10, -8, asm.R7, asm.DWord),
+			asm.LoadImm(asm.R1, int64(pidNSDev), asm.DWord),
+			asm.LoadImm(asm.R2, int64(pidNSIno), asm.DWord),
+			asm.Mov.Reg(asm.R3, asm.R10),
+			asm.Add.Imm(asm.R3, -8),
+			asm.Mov.Imm(asm.R4, 8),
+			asm.FnGetNsCurrentPidTgid.Call(),
+			asm.JNE.Imm(asm.R0, 0, "submit"),
+			asm.LoadMem(asm.R7, asm.R10, -4, asm.Word),
+			asm.LSh.Imm(asm.R7, 32),
+			asm.LoadMem(asm.R8, asm.R10, -8, asm.Word),
+			asm.Or.Reg(asm.R7, asm.R8),
+			asm.StoreMem(asm.R6, 16, asm.R7, asm.DWord),
+		)
+	}
+	insns = append(insns,
+		asm.Mov.Reg(asm.R1, asm.R6).WithSymbol("submit"),
 		asm.Mov.Imm(asm.R2, 0),
 		asm.FnRingbufSubmit.Call(),
 		asm.Mov.Imm(asm.R0, returnValue).WithSymbol("exit"),
 		asm.Return(),
+	)
+	meta := map[string]any{"event_map": args.EventMap, "event_format": eventFormat}
+	if usePidNS {
+		meta["pidns_dev"] = pidNSDev
+		meta["pidns_ino"] = pidNSIno
 	}
-	return insns, map[string]any{"event_map": args.EventMap, "event_format": "u64 ktime_ns; u64 pid_tgid"}, nil
+	return insns, meta, nil
 }
 
 func ebpfScriptResult(fields map[string]any, err error) (map[string]any, error) {
