@@ -57,6 +57,7 @@ Common script groups:
 - Buffers and mappings: `sys.bufferAlloc`, `sys.bufferWrite`, `sys.bufferRead`, `sys.bufferInfo`, `sys.bufferFree`, `sys.mmap`, `sys.munmap`, `sys.mprotect`, `sys.msync`, `sys.madvise`, `sys.memRead`, `sys.memWrite`.
 - Networking and readiness: `sys.socket`, `sys.socketpair`, `sys.bind`, `sys.connect`, `sys.listen`, `sys.accept`, `sys.send`, `sys.sendto`, `sys.recvfrom`, `sys.sendmsg`, `sys.recvmsg`, `sys.getsockname`, `sys.getpeername`, `sys.setsockoptInt`, `sys.getsockoptInt`, `sys.setsockoptString`, `sys.getsockoptString`, `sys.setsockoptByte`, `sys.getsockoptByte`, `sys.setsockoptUint64`, `sys.getsockoptUint64`, `sys.bindToDevice`, `sys.shutdown`, `sys.poll`, `sys.epollCreate`, `sys.epollCtl`, `sys.epollWait`, `sys.eventfd`, `sys.timerfdCreate`, `sys.timerfdGettime`, `sys.timerfdSettime`, `sys.inotifyInit1`, `sys.inotifyAddWatch`, `sys.inotifyRmWatch`.
 - Process, xattr, and transfer: `sys.kill`, `sys.tgkill`, `sys.wait4`, `sys.prctl`, `sys.prctlRetInt`, `sys.pidfdOpen`, `sys.pidfdGetfd`, `sys.pidfdSendSignal`, `sys.ptraceAttach`, `sys.ptraceDetach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceGetRegs`, `sys.ptraceSetOptions`, `sys.processVMReadv`, `sys.processVMWritev`, `sys.getpgid`, `sys.getpgrp`, `sys.getsid`, `sys.setpgid`, `sys.setsid`, `sys.getpriority`, `sys.setpriority`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.prlimit`, `sys.getrusage`, `sys.clockGettime`, `sys.clockGetres`, `sys.gettimeofday`, `sys.nanosleep`, `sys.getrandom`, `sys.getxattr`, `sys.listxattr`, `sys.setxattr`, `sys.removexattr`, `sys.memfdCreate`, `sys.sendfile`, `sys.copyFileRange`, `sys.splice`, `sys.tee`, `sys.vmsplice`.
+- eBPF: `sys.ebpfInfo`, `sys.ebpfRemoveMemlock`, `sys.ebpfFeatureProbe`, `sys.ebpfBTFKernelInfo`, `sys.ebpfMapCreate`, `sys.ebpfMapLoadPinned`, `sys.ebpfMapLookup`, `sys.ebpfMapUpdate`, `sys.ebpfMapEntries`, `sys.ebpfProgramLoad`, `sys.ebpfProgramTest`, `sys.ebpfAttachSocketFilter`, `sys.ebpfAttachKprobe`, `sys.ebpfAttachKretprobe`, `sys.ebpfAttachTracepoint`, `sys.ebpfAttachRawTracepoint`, `sys.ebpfAttachXDP`, `sys.ebpfLinkInfo`, `sys.ebpfLinkClose`, `sys.ebpfRingbufReaderCreate`, `sys.ebpfRingbufRead`, `sys.ebpfPerfReaderCreate`, `sys.ebpfPerfRead`. `sys.ebpfProgramLoad` accepts self-contained built-in kinds such as `return`, `counter`, `perf_event`, `ringbuf_event`, `socket_filter_pass`, and `socket_filter_drop`; scripts do not need target-side C compilation, raw assembly, or ELF loading.
 - Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, `os.getenv`, `os.setenv`, `os.getwd`, `os.readDir`, `os.stat`, `os.findProcess`, `os.startProcess`.
 - Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, `io.pipe`.
 
@@ -97,4 +98,15 @@ try {
   os.fileClose({handle: "copySrc"});
   os.fileClose({handle: "copyDst"});
 }
+```
+
+Self-contained eBPF socket-filter example:
+
+```javascript
+const info = sys.ebpfInfo();
+const prog = sys.ebpfProgramLoad({kind: "socket_filter_pass", handle: "passAll"});
+if (!prog.ok) return {info, prog};
+const pair = sys.socketpair({type: "SOCK_DGRAM|SOCK_CLOEXEC", handles: ["left", "right"]});
+const attach = sys.ebpfAttachSocketFilter({program: "passAll", handle: "left"});
+return {info, prog, attach, state: sys.ebpfProgramInfo({program: "passAll"})};
 ```

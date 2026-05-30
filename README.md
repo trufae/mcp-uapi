@@ -19,6 +19,7 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - Process control: `kill`, `wait4`, `prctl`, `ptrace` attach/detach/read/write/continue/syscall/get-registers/set-options.
 - Extended attributes and transfer: get/list/set/remove xattr families, `sendfile`, and `copy_file_range`.
 - `ioctl`: integer argument or pointer to a managed buffer range.
+- eBPF: self-contained `github.com/cilium/ebpf` helpers for maps, built-in program kinds, links, ringbuf/perf readers, feature probes, BTF inspection, and pinning. Scripts do not need clang, bpftool, a C compiler, raw assembly, or ELF loading on the target.
 - Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
 - `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, and `io.*` wrappers, captured logs, timeout enforcement, and JSON results.
 
@@ -31,6 +32,8 @@ The documentation resources are backed by the markdown files in `docs/` and embe
 This server intentionally exposes direct Linux syscalls. It can create files, open sockets, signal processes, attach to ptrace-allowed processes, mutate mappings, and issue arbitrary ioctls. Run it only in an isolated lab environment with a trusted MCP client.
 
 Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `os.open`, `os.create`, `os.openRoot`, `sys.socket`, `sys.socketpair`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs.
+
+eBPF loading and attachment can observe or affect kernel execution depending on program type, return value, and hook. Kernel policy and capabilities still apply. Prefer explicit cleanup with `sys.ebpfLinkClose`, `sys.ebpfProgramClose`, `sys.ebpfMapClose`, and reader close helpers unless a pin is intentionally used to persist an object.
 
 Linux syscall failures are returned as structured data instead of MCP tool errors:
 
@@ -83,7 +86,7 @@ Useful startup flags:
 
 ## Supported Targets
 
-All targets are Linux-only. Cross builds are pure Go with cgo disabled.
+All targets are Linux-only. Cross builds are pure Go with cgo disabled. The eBPF API is compiled into the same binary on these targets, but runtime support depends on the deployed kernel, enabled BPF features, privilege policy, memlock accounting, and bpffs availability.
 
 | Target              | Binary                         |
 |---------------------|--------------------------------|
@@ -114,6 +117,10 @@ Build all targets at once:
 ```bash
 ./scripts/build-all-targets.sh
 ```
+
+For eBPF on embedded targets such as ARM64 routers, build and deploy only the MCP binary. The target does not need a C compiler or eBPF toolchain. Use `sys.ebpfInfo()` and `sys.ebpfFeatureProbe()` from eval to discover what the running kernel permits.
+
+The eBPF helpers cross-build for every target above. On `linux/mips`, `sys.ebpfPerfReaderCreate` returns `ErrNotSupported`; use ring buffers or map polling for event delivery on that target.
 
 ## Examples
 
@@ -176,6 +183,16 @@ try {
   os.fileClose({handle: 'src'});
   os.fileClose({handle: 'dst'});
 }
+```
+
+Load a self-contained eBPF socket filter without a target-side compiler:
+
+```javascript
+const prog = sys.ebpfProgramLoad({kind: "socket_filter_pass", handle: "passAll"});
+if (!prog.ok) return prog;
+const pair = sys.socketpair({type: "SOCK_DGRAM|SOCK_CLOEXEC", handles: ["left", "right"]});
+const attach = sys.ebpfAttachSocketFilter({program: "passAll", handle: "left"});
+return {prog, attach, info: sys.ebpfInfo()};
 ```
 
 More ready-to-run scripts live in [examples/](examples/).

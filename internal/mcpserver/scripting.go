@@ -211,6 +211,7 @@ func (e *scriptEnv) uapiObject() *goja.Object {
 		_ = obj.Set(jsName, e.toolFunc(toolName))
 	}
 	e.addScriptUnixExtensions(obj)
+	e.addScriptEBPFExtensions(obj)
 	return obj
 }
 
@@ -349,6 +350,7 @@ func scriptWrapperNames() []string {
 	}
 	names = append(names, "state", "hex")
 	names = append(names, scriptUnixExtensionNames()...)
+	names = append(names, scriptEBPFExtensionNames()...)
 	sort.Strings(names)
 	return names
 }

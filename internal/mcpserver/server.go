@@ -39,6 +39,17 @@ type App struct {
 	roots             map[string]*rootEntry
 	nextProcessHandle uint64
 	processes         map[string]*processEntry
+
+	nextEBPFMapHandle     uint64
+	ebpfMaps              map[string]*ebpfMapEntry
+	nextEBPFProgramHandle uint64
+	ebpfPrograms          map[string]*ebpfProgramEntry
+	nextEBPFLinkHandle    uint64
+	ebpfLinks             map[string]*ebpfLinkEntry
+	nextRingReaderHandle  uint64
+	ringReaders           map[string]*ebpfRingReaderEntry
+	nextPerfReaderHandle  uint64
+	perfReaders           map[string]*ebpfPerfReaderEntry
 }
 
 type fdEntry struct {
@@ -71,12 +82,17 @@ func New(config Config) (*App, *server.MCPServer) {
 		config.MaxBufferBytes = defaultMaxBufferBytes
 	}
 	app := &App{
-		config:    config,
-		fds:       map[string]*fdEntry{},
-		buffers:   map[string]*bufferEntry{},
-		mappings:  map[string]*mmapEntry{},
-		roots:     map[string]*rootEntry{},
-		processes: map[string]*processEntry{},
+		config:       config,
+		fds:          map[string]*fdEntry{},
+		buffers:      map[string]*bufferEntry{},
+		mappings:     map[string]*mmapEntry{},
+		roots:        map[string]*rootEntry{},
+		processes:    map[string]*processEntry{},
+		ebpfMaps:     map[string]*ebpfMapEntry{},
+		ebpfPrograms: map[string]*ebpfProgramEntry{},
+		ebpfLinks:    map[string]*ebpfLinkEntry{},
+		ringReaders:  map[string]*ebpfRingReaderEntry{},
+		perfReaders:  map[string]*ebpfPerfReaderEntry{},
 	}
 	srv := server.NewMCPServer(
 		"mcp-uapi",
@@ -96,12 +112,32 @@ func New(config Config) (*App, *server.MCPServer) {
 }
 
 func serverInstructions() string {
-	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval scripts from examples/*.js, at build time. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix, including managed FDs, buffers, mmap regions, sockets, poll/epoll, vector I/O, process_vm_readv/writev, pidfd, timerfd, xattrs, eventfd/inotify, process helpers, and ioctl. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, and sys.eventfd; raw integer FDs require --allow-raw-fd."
+	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval scripts from examples/*.js, at build time. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix and github.com/cilium/ebpf, including managed FDs, buffers, mmap regions, sockets, poll/epoll, vector I/O, process_vm_readv/writev, pidfd, timerfd, xattrs, eventfd/inotify, process helpers, ioctl, and self-contained eBPF map/program/link/event-reader helpers. eBPF programs are authored through built-in script-level kinds such as return, counter, perf_event, ringbuf_event, socket_filter_pass, and socket_filter_drop; the MCP binary compiles these internally and does not require clang, bpftool, a C compiler, an assembler, or ELF loading on the target. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall and eBPF kernel errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, sys.eventfd, sys.ebpfMapCreate, sys.ebpfMapLoadPinned, sys.ebpfProgramLoad, sys.ebpfProgramLoadPinned, sys.ebpfAttachKprobe, sys.ebpfAttachTracepoint, sys.ebpfRingbufReaderCreate, and sys.ebpfPerfReaderCreate; raw integer FDs require --allow-raw-fd."
 }
 
 func (a *App) Close() {
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	for handle, reader := range a.perfReaders {
+		_ = reader.Reader.Close()
+		delete(a.perfReaders, handle)
+	}
+	for handle, reader := range a.ringReaders {
+		_ = reader.Reader.Close()
+		delete(a.ringReaders, handle)
+	}
+	for handle, ebpfLink := range a.ebpfLinks {
+		_ = ebpfLink.Link.Close()
+		delete(a.ebpfLinks, handle)
+	}
+	for handle, program := range a.ebpfPrograms {
+		_ = program.Program.Close()
+		delete(a.ebpfPrograms, handle)
+	}
+	for handle, ebpfMap := range a.ebpfMaps {
+		_ = ebpfMap.Map.Close()
+		delete(a.ebpfMaps, handle)
+	}
 	for handle, mapping := range a.mappings {
 		_ = unix.Munmap(mapping.Data)
 		delete(a.mappings, handle)
@@ -275,14 +311,19 @@ func (a *App) stateSnapshot() map[string]any {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return map[string]any{
-		"allow_raw_fd":     a.config.AllowRawFD,
-		"max_read_bytes":   a.config.MaxReadBytes,
-		"max_buffer_bytes": a.config.MaxBufferBytes,
-		"fds":              a.fdInfosLocked(),
-		"buffers":          a.bufferInfosLocked(),
-		"mappings":         a.mappingInfosLocked(),
-		"roots":            rootInfosLocked(a.roots),
-		"processes":        processInfosLocked(a.processes),
+		"allow_raw_fd":      a.config.AllowRawFD,
+		"max_read_bytes":    a.config.MaxReadBytes,
+		"max_buffer_bytes":  a.config.MaxBufferBytes,
+		"fds":               a.fdInfosLocked(),
+		"buffers":           a.bufferInfosLocked(),
+		"mappings":          a.mappingInfosLocked(),
+		"roots":             rootInfosLocked(a.roots),
+		"processes":         processInfosLocked(a.processes),
+		"ebpf_maps":         a.ebpfMapInfosLocked(),
+		"ebpf_programs":     a.ebpfProgramInfosLocked(),
+		"ebpf_links":        a.ebpfLinkInfosLocked(),
+		"ebpf_ring_readers": a.ebpfRingReaderInfosLocked(),
+		"ebpf_perf_readers": a.ebpfPerfReaderInfosLocked(),
 	}
 }
 

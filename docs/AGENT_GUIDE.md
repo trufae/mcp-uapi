@@ -105,4 +105,6 @@ Reusable eval scripts live in the repository under `examples/*.js`, are embedded
 
 ## API Documents
 
-API-specific documentation lives under `uapi://api`. Start with `uapi://api` for the index, then read resources such as `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, and `uapi://api/sys-unix-process-memory` for wrapper parameters, relevant constants, and copy-ready examples.
+API-specific documentation lives under `uapi://api`. Start with `uapi://api` for the index, then read resources such as `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, `uapi://api/sys-unix-process-memory`, and `uapi://api/ebpf` for wrapper parameters, relevant constants, and copy-ready examples.
+
+For eBPF workflows, prefer the self-contained program kinds documented in `uapi://api/ebpf`. They are compiled inside the MCP binary and do not require clang, bpftool, a C compiler, raw assembly, or ELF loading on the target device.

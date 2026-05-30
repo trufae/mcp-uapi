@@ -3,6 +3,7 @@ module github.com/nullsub/mcp-uapi
 go 1.25.5
 
 require (
+	github.com/cilium/ebpf v0.21.0
 	github.com/dop251/goja v0.0.0-20260311135729-065cd970411c
 	github.com/mark3labs/mcp-go v0.54.0
 	golang.org/x/sys v0.38.0

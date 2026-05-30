@@ -38,7 +38,7 @@ Fields typed as integer or string accept numeric values, hex strings, or constan
 {"flags":"O_RDWR|O_CREAT|O_CLOEXEC"}
 ```
 
-Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `timerfd`, `signalfd`, `memfd`, `pidfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `priority`, `clock`, `random`, `fadvise`, `fallocate`, `sync_file_range`, `splice`, `rwf`, `openat2`, `flock`, `syscall`, `ioctl`, `prctl`, `go_os`, `go_io`, and `errno`.
+Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `timerfd`, `signalfd`, `memfd`, `pidfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `priority`, `clock`, `random`, `fadvise`, `fallocate`, `sync_file_range`, `splice`, `rwf`, `openat2`, `flock`, `syscall`, `ioctl`, `prctl`, `ebpf`, `go_os`, `go_io`, and `errno`.
 
 ## Handles
 
@@ -57,12 +57,13 @@ Managed handles are returned by script helpers that create resources. Use `handl
 - Process and resources: `sys.kill`, `sys.tgkill`, `sys.wait4`, `sys.prctl`, `sys.prctlRetInt`, `sys.pidfdOpen`, `sys.pidfdGetfd`, `sys.pidfdSendSignal`, `sys.ptraceAttach`, `sys.ptraceRead`, `sys.ptraceWrite`, `sys.ptraceCont`, `sys.ptraceSyscall`, `sys.ptraceGetRegs`, `sys.ptraceSetOptions`, `sys.ptraceDetach`, `sys.getpgid`, `sys.getpgrp`, `sys.getsid`, `sys.setpgid`, `sys.setsid`, `sys.getpriority`, `sys.setpriority`, `sys.getgroups`, `sys.getresuid`, `sys.getresgid`, `sys.getrlimit`, `sys.setrlimit`, `sys.prlimit`, `sys.getrusage`, `sys.clockGettime`, `sys.clockGetres`, `sys.gettimeofday`, `sys.nanosleep`, `sys.getrandom`, `sys.sysinfo`.
 - Extended attributes and transfer: `sys.getxattr`, `sys.lgetxattr`, `sys.fgetxattr`, `sys.listxattr`, `sys.llistxattr`, `sys.flistxattr`, `sys.setxattr`, `sys.lsetxattr`, `sys.fsetxattr`, `sys.removexattr`, `sys.lremovexattr`, `sys.fremovexattr`, `sys.send`, `sys.sendmsg`, `sys.recvmsg`, `sys.sendfile`, `sys.copyFileRange`, `sys.splice`, `sys.tee`, `sys.vmsplice`, `sys.processVMReadv`, `sys.processVMWritev`.
 - Ioctl: `sys.ioctl` with `arg` or `buffer`/`buffer_offset`/`buffer_length`.
+- eBPF: `sys.ebpfInfo`, `sys.ebpfRemoveMemlock`, `sys.ebpfFeatureProbe`, `sys.ebpfBTFKernelInfo`, `sys.ebpfMapCreate`, `sys.ebpfMapLoadPinned`, `sys.ebpfMapLookup`, `sys.ebpfMapUpdate`, `sys.ebpfMapEntries`, `sys.ebpfMapPin`, `sys.ebpfProgramLoad`, `sys.ebpfProgramLoadPinned`, `sys.ebpfProgramTest`, `sys.ebpfAttachSocketFilter`, `sys.ebpfAttachKprobe`, `sys.ebpfAttachKretprobe`, `sys.ebpfAttachTracepoint`, `sys.ebpfAttachRawTracepoint`, `sys.ebpfAttachXDP`, `sys.ebpfLinkInfo`, `sys.ebpfLinkClose`, `sys.ebpfRingbufReaderCreate`, `sys.ebpfRingbufRead`, `sys.ebpfPerfReaderCreate`, and `sys.ebpfPerfRead`. Program loading uses built-in self-contained kinds, not target-side C compilation or raw assembly input.
 - Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, env helpers, directory/stat helpers, and process helpers.
 - Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, and `io.pipe`.
 
 The `os` and `io` globals use lower camel-case names and also expose Go-style aliases such as `os.ReadFile` and `io.Copy`. File-returning `os` helpers return managed FD handles. Release them with `os.fileClose({handle})` or `sys.close({handle})`; release roots with `os.rootClose({root})`.
 
-API-specific docs are available under `uapi://api`, including `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, `uapi://api/sys-unix-process-memory`, and `uapi://api/sys-unix-coverage`.
+API-specific docs are available under `uapi://api`, including `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, `uapi://api/sys-unix-process-memory`, `uapi://api/sys-unix-coverage`, and `uapi://api/ebpf`.
 
 ## Ptrace Workflow
 
