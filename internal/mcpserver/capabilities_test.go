@@ -16,13 +16,16 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	if doc.ClientBootstrap.ScriptingAPIResource != "uapi://scripting-api" {
 		t.Fatalf("scripting resource = %q", doc.ClientBootstrap.ScriptingAPIResource)
 	}
+	if doc.ClientBootstrap.ToolsGuideResource != "uapi://tools-guide" {
+		t.Fatalf("tools guide resource = %q", doc.ClientBootstrap.ToolsGuideResource)
+	}
 	if doc.ClientBootstrap.AgentGuideResource != "uapi://agent-guide" {
 		t.Fatalf("agent guide resource = %q", doc.ClientBootstrap.AgentGuideResource)
 	}
 	if !containsString(doc.Resources, "uapi://agent-guide") {
 		t.Fatalf("capabilities missing agent guide resource: %#v", doc.Resources)
 	}
-	for _, uri := range []string{"uapi://docs", "uapi://docs/index.json", "uapi://examples", "uapi://examples/index.json", "uapi://examples/001-network-interfaces-ioctl.js"} {
+	for _, uri := range []string{"uapi://docs", "uapi://docs/index.json", "uapi://tools-guide", "uapi://examples", "uapi://examples/index.json", "uapi://examples/001-network-interfaces-ioctl.js"} {
 		if !containsString(doc.Resources, uri) {
 			t.Fatalf("capabilities missing resource %s: %#v", uri, doc.Resources)
 		}
@@ -42,11 +45,13 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	if !containsString(doc.ClientBootstrap.DoNotUse, "uapi.request('GET', 'uapi://capabilities')") {
 		t.Fatalf("do_not_use should include uapi.request pattern: %#v", doc.ClientBootstrap.DoNotUse)
 	}
-	if len(doc.Tools) != 1 || doc.Tools[0].Name != "eval" {
-		t.Fatalf("public tools = %#v, want eval only", doc.Tools)
+	for _, tool := range []string{"eval", "tool_register", "tool_update", "tool_execute", "tool_list", "tool_read", "tool_export", "tool_import", "tool_delete"} {
+		if !containsToolSummary(doc.Tools, tool) {
+			t.Fatalf("public tools missing %s: %#v", tool, doc.Tools)
+		}
 	}
-	if len(toolSummaryRegistry()) != 1 || toolSummaryRegistry()[0].name != "eval" {
-		t.Fatalf("tool registry should expose only eval: %#v", toolSummaryRegistry())
+	if !containsString(toolSpecNames(toolSummaryRegistry()), "tool_execute") {
+		t.Fatalf("tool registry missing managed tool execution: %#v", toolSummaryRegistry())
 	}
 	if !containsString(doc.ScriptingAPI.UAPIWrappers, "socketpair") || !containsString(doc.ScriptingAPI.UAPIWrappers, "ptraceRead") {
 		t.Fatalf("legacy scripting wrappers missing expected entries: %#v", doc.ScriptingAPI.UAPIWrappers)
@@ -84,6 +89,9 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 func TestEmbeddedDocsAndExamples(t *testing.T) {
 	if !strings.Contains(agentGuideMarkdown(), "uapi://examples") {
 		t.Fatalf("agent guide should mention embedded examples")
+	}
+	if !strings.Contains(agentGuideMarkdown(), "uapi://tools-guide") || !strings.Contains(mustEmbeddedText("docs/TOOLS.md"), "tool_register") {
+		t.Fatalf("managed tool documentation should be embedded and linked")
 	}
 	if !strings.Contains(apiReferenceMarkdown(), "# API Reference") {
 		t.Fatalf("api reference should come from docs/API.md")
@@ -153,6 +161,20 @@ func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
 		t.Fatalf("initialize client: %v", err)
 	}
 
+	listedTools, err := client.ListTools(t.Context(), mcp.ListToolsRequest{})
+	if err != nil {
+		t.Fatalf("list tools: %v", err)
+	}
+	toolNames := make([]string, 0, len(listedTools.Tools))
+	for _, tool := range listedTools.Tools {
+		toolNames = append(toolNames, tool.Name)
+	}
+	for _, name := range []string{"eval", "tool_register", "tool_execute", "tool_export", "tool_import", "tool_delete"} {
+		if !containsString(toolNames, name) {
+			t.Fatalf("listed tools missing %s: %#v", name, toolNames)
+		}
+	}
+
 	listed, err := client.ListResources(t.Context(), mcp.ListResourcesRequest{})
 	if err != nil {
 		t.Fatalf("list resources: %v", err)
@@ -161,7 +183,7 @@ func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
 	for _, resource := range listed.Resources {
 		resourceURIs = append(resourceURIs, resource.URI)
 	}
-	for _, uri := range []string{"uapi://docs", "uapi://api", "uapi://api/sys-unix", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
+	for _, uri := range []string{"uapi://docs", "uapi://tools-guide", "uapi://api", "uapi://api/sys-unix", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
 		if !containsString(resourceURIs, uri) {
 			t.Fatalf("listed resources missing %s: %#v", uri, resourceURIs)
 		}
@@ -215,6 +237,23 @@ func TestBuiltInDocsGuideAgentsAwayFromRequestHelpers(t *testing.T) {
 			t.Fatalf("%s should tell agents to use MCP resources outside eval", name)
 		}
 	}
+}
+
+func containsToolSummary(values []ToolSummary, want string) bool {
+	for _, value := range values {
+		if value.Name == want {
+			return true
+		}
+	}
+	return false
+}
+
+func toolSpecNames(values []toolSpec) []string {
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		names = append(names, value.name)
+	}
+	return names
 }
 
 func containsString(values []string, want string) bool {

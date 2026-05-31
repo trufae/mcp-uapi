@@ -1,8 +1,10 @@
 # Scripting API
 
-`eval` is the only public MCP tool. It runs JavaScript in a fresh Goja runtime for each call. Scripts execute inside a function body, so use `return` for the JSON result. Console output is captured and returned with the eval response.
+`eval` is the one-off JavaScript execution tool. Managed-tool MCP operations can register that same kind of script for reuse, but both `eval` and `tool_execute` run scripts in a fresh Goja runtime for each call. Scripts execute inside a function body, so use `return` for the JSON result. Console output is captured and returned with the eval response.
 
-Before eval, agents should read MCP resources `uapi://agent-guide`, `uapi://scripting-api`, `uapi://api-reference`, `uapi://api`, and `uapi://capabilities` through the MCP client resource API. Those resources are not JavaScript URLs. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval.
+Before eval, agents should read MCP resources `uapi://agent-guide`, `uapi://tools-guide`, `uapi://scripting-api`, `uapi://api-reference`, `uapi://api`, and `uapi://capabilities` through the MCP client resource API. Those resources are not JavaScript URLs. Do not call `uapi.request('GET', 'uapi://capabilities')`, `sys.request`, `fetch`, `require`, or `import` inside eval.
+
+Use `tool_register`, `tool_execute`, `tool_list`, `tool_read`, `tool_export`, `tool_import`, `tool_update`, and `tool_delete` outside JavaScript when a script should become a reusable managed tool. Managed tools use the same globals and result shape documented here. Read `uapi://tools-guide` for the lifecycle, bundle format, and optional `--tool-db` persistence mode.
 
 Reusable scripts live as individual files in `examples/`, are embedded into the binary at build time, and are exposed as `uapi://examples/<file>.js`. Read `uapi://examples` for a human-readable index or `uapi://examples/index.json` for metadata before choosing a script.
 

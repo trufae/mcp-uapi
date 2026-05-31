@@ -24,6 +24,7 @@ type ClientBootstrapInfo struct {
 	RecommendedFirstCalls []string       `json:"recommended_first_calls"`
 	AgentGuideResource    string         `json:"agent_guide_resource"`
 	ScriptingAPIResource  string         `json:"scripting_api_resource"`
+	ToolsGuideResource    string         `json:"tools_guide_resource"`
 	APIReferenceResource  string         `json:"api_reference_resource"`
 	DocsIndexResource     string         `json:"docs_index_resource"`
 	ExamplesIndexResource string         `json:"examples_index_resource"`
@@ -92,12 +93,13 @@ func Capabilities() CapabilityDocument {
 	return CapabilityDocument{
 		Name:       "mcp-uapi",
 		Version:    Version,
-		Purpose:    "Expose Linux user-mode APIs from golang.org/x/sys/unix and self-contained eBPF monitoring helpers through a single JavaScript eval scripting layer for embedded testing, reconnaissance, and proof-of-concept development.",
+		Purpose:    "Expose Linux user-mode APIs from golang.org/x/sys/unix and self-contained eBPF monitoring helpers through JavaScript eval, plus managed eval tools that agents can register, reuse, export, import, and optionally persist.",
 		Transports: []string{"stdio", "streamable-http"},
 		ClientBootstrap: ClientBootstrapInfo{
-			RecommendedFirstCalls: []string{"MCP resources/read uapi://agent-guide", "MCP resources/read uapi://scripting-api", "MCP resources/read uapi://api-reference", "MCP resources/read uapi://api", "MCP resources/read uapi://examples", "MCP resources/read uapi://capabilities", "MCP tools/call eval for all syscall workflows", "MCP resources/read uapi://state when reusing handles"},
+			RecommendedFirstCalls: []string{"MCP resources/read uapi://agent-guide", "MCP resources/read uapi://tools-guide", "MCP resources/read uapi://scripting-api", "MCP resources/read uapi://api-reference", "MCP resources/read uapi://api", "MCP resources/read uapi://examples", "MCP resources/read uapi://capabilities", "MCP tools/call tool_list to discover registered eval tools", "MCP tools/call eval for one-off syscall workflows", "MCP resources/read uapi://state when reusing handles"},
 			AgentGuideResource:    "uapi://agent-guide",
 			ScriptingAPIResource:  "uapi://scripting-api",
+			ToolsGuideResource:    "uapi://tools-guide",
 			APIReferenceResource:  "uapi://api-reference",
 			DocsIndexResource:     "uapi://docs",
 			ExamplesIndexResource: "uapi://examples",
@@ -112,7 +114,8 @@ func Capabilities() CapabilityDocument {
 			},
 			DoNotUse: []string{"uapi.request('GET', 'uapi://capabilities')", "sys.request('GET', 'uapi://capabilities')", "fetch('uapi://capabilities')", "require('fs')", "import('node:fs')", "os.exit/os.Exit", "calling uapi_* as public MCP tools"},
 			Notes: []string{
-				"The only public MCP tool is eval; syscall functionality is available inside the JavaScript sys/uapi object.",
+				"Public MCP tools include eval for one-off scripts and tool_register/tool_update/tool_execute/tool_list/tool_read/tool_export/tool_import/tool_delete for reusable managed eval tools.",
+				"Managed eval tools live in memory by default; start the server with --tool-db to back them with an on-device JSON database that survives restarts.",
 				"The JavaScript os and io globals provide Go standard-library style wrappers over managed handles and explicit byte encodings; they are not Node.js modules.",
 				"Read uapi://agent-guide, uapi://scripting-api, uapi://api-reference, uapi://api, and uapi://examples through MCP resource APIs before composing nontrivial eval scripts.",
 				"Documentation resources are backed by docs/*.md and docs/api/*.md, and example script resources are backed by examples/*.js, then embedded into the binary by Go at build time.",
@@ -145,6 +148,7 @@ func Capabilities() CapabilityDocument {
 			{"eBPF", "Create maps, load self-contained built-in eBPF program kinds, attach them to kernel hooks, pin/load objects, probe features, and read ringbuf/perf event streams without a target-side C toolchain.", []string{"sys.ebpfInfo", "sys.ebpfRemoveMemlock", "sys.ebpfFeatureProbe", "sys.ebpfBTFKernelInfo", "sys.ebpfMapCreate", "sys.ebpfMapLookup", "sys.ebpfMapUpdate", "sys.ebpfProgramLoad", "sys.ebpfProgramTest", "sys.ebpfAttachKprobe", "sys.ebpfAttachKretprobe", "sys.ebpfAttachTracepoint", "sys.ebpfAttachRawTracepoint", "sys.ebpfAttachXDP", "sys.ebpfLinkInfo", "sys.ebpfLinkClose", "sys.ebpfRingbufReaderCreate", "sys.ebpfRingbufRead", "sys.ebpfPerfReaderCreate", "sys.ebpfPerfRead"}},
 			{"Go standard library scripting", "Use package-os and package-io style helpers for portable filesystem, environment, root, process, and stream workflows over the same managed handles.", []string{"os.readFile", "os.writeFile", "os.open", "os.openFile", "os.openRoot", "os.rootReadFile", "os.fileRead", "os.fileWrite", "io.copy", "io.copyN", "io.readAll", "io.readFull", "io.writeString"}},
 			{"JavaScript scripting", "Compose multi-step syscall and standard-library workflows in one eval call with captured logs, args, timeouts, and JSON results.", []string{"eval", "sys.*", "uapi.*", "os.*", "io.*"}},
+			{"managed eval tools", "Register, update, execute, list, read, export, import, delete, and optionally persist reusable eval scripts for agents and shared toolboxes.", []string{"tool_register", "tool_update", "tool_execute", "tool_list", "tool_read", "tool_export", "tool_import", "tool_delete", "--tool-db"}},
 		},
 		Constants:      constantCatalog(),
 		Tools:          toolSummaries(),
@@ -153,7 +157,7 @@ func Capabilities() CapabilityDocument {
 		ExampleScripts: exampleScriptSummaries(),
 		Prompts:        []string{"uapi_recon_quickstart", "uapi_eval_quickstart", "uapi_ptrace_memory_probe", "uapi_socket_fuzzing"},
 		ScriptingAPI:   scriptingAPIInfo(),
-		Implementation: []string{"The public MCP tool surface registers only eval; MCP resources and prompts remain available for discovery and documentation.", "Documentation resources are sourced from docs/*.md and docs/api/*.md, and example script resources from examples/*.js, via Go embed at build time.", "MCP resource reads happen outside eval through the client; the JavaScript runtime intentionally has no uapi.request, sys.request, fetch, require, or import helpers.", "The scripting layer keeps FD, buffer, mmap, os.Root, os.Process, eBPF map, eBPF program, eBPF link, ringbuf reader, and perf reader lifetimes in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "The eBPF layer uses github.com/cilium/ebpf internally; scripts select built-in program kinds instead of supplying raw assembly or compiling C on the target.", "Perf event readers are unavailable on linux/mips and return ErrNotSupported there; use ring buffers or map polling on that target.", "Goja eval creates a fresh runtime per call and exposes sys/uapi plus os/io globals for synchronous Unix and Go standard-library workflows."},
+		Implementation: []string{"The public MCP tool surface registers eval plus managed-tool lifecycle tools; MCP resources and prompts remain available for discovery and documentation.", "Managed eval tools are process-local in memory by default and can be backed by an atomically rewritten JSON database when --tool-db is set.", "Documentation resources are sourced from docs/*.md and docs/api/*.md, and example script resources from examples/*.js, via Go embed at build time.", "MCP resource reads happen outside eval through the client; the JavaScript runtime intentionally has no uapi.request, sys.request, fetch, require, or import helpers.", "The scripting layer keeps FD, buffer, mmap, os.Root, os.Process, eBPF map, eBPF program, eBPF link, ringbuf reader, and perf reader lifetimes in process-local registries guarded by a mutex.", "The syscall layer uses golang.org/x/sys/unix directly and treats Unix errno as normal structured results.", "The eBPF layer uses github.com/cilium/ebpf internally; scripts select built-in program kinds instead of supplying raw assembly or compiling C on the target.", "Perf event readers are unavailable on linux/mips and return ErrNotSupported there; use ring buffers or map polling on that target.", "Goja eval creates a fresh runtime per call and exposes sys/uapi plus os/io globals for synchronous Unix and Go standard-library workflows."},
 	}
 }
 

@@ -336,3 +336,71 @@ const schemaEval = `{
   "properties":{"script":{"type":"string","description":"JavaScript source. Globals: args, console, print, sys, uapi, os, io."},"args":{"type":"object"},"timeout_ms":{"type":["integer","string"],"default":5000},"max_log_entries":{"type":["integer","string"],"default":200},"max_result_bytes":{"type":["integer","string"]}},
   "required":["script"]
 }`
+
+const schemaToolRegister = `{
+  "type":"object",
+  "description":"Register a reusable eval script as a named managed tool.",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string","description":"Stable tool name using A-Za-z0-9_.:-."},"description":{"type":"string"},"script":{"type":"string","description":"JavaScript source run inside eval with caller args."},"input_schema":{"type":"object","description":"Optional JSON Schema object describing args accepted by the script."},"tags":{"type":"array","items":{"type":"string"},"maxItems":32},"read_only":{"type":"boolean","default":false},"destructive":{"type":"boolean","default":true},"timeout_ms":{"type":["integer","string"]},"max_log_entries":{"type":["integer","string"]},"max_result_bytes":{"type":["integer","string"]},"metadata":{"type":"object"},"replace_existing":{"type":"boolean","default":false}},
+  "required":["name","script"]
+}`
+
+const schemaToolUpdate = `{
+  "type":"object",
+  "description":"Update an existing managed eval tool. Omitted fields keep their current value; null input_schema clears it.",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string"},"description":{"type":"string"},"script":{"type":"string"},"input_schema":{"type":["object","null"]},"tags":{"type":"array","items":{"type":"string"},"maxItems":32},"read_only":{"type":"boolean"},"destructive":{"type":"boolean"},"timeout_ms":{"type":["integer","string"]},"max_log_entries":{"type":["integer","string"]},"max_result_bytes":{"type":["integer","string"]},"metadata":{"type":"object"}},
+  "required":["name"]
+}`
+
+const schemaToolExecute = `{
+  "type":"object",
+  "description":"Execute a registered managed eval tool by name. args becomes the script's args global.",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string"},"args":{"type":"object"},"timeout_ms":{"type":["integer","string"],"description":"Optional per-call override."},"max_log_entries":{"type":["integer","string"],"description":"Optional per-call override."},"max_result_bytes":{"type":["integer","string"],"description":"Optional per-call override."}},
+  "required":["name"]
+}`
+
+const schemaToolList = `{
+  "type":"object",
+  "description":"List registered managed eval tools without script bodies. Optional tags filter requires all listed tags.",
+  "additionalProperties":false,
+  "properties":{"tags":{"type":"array","items":{"type":"string"},"maxItems":32}}
+}`
+
+const schemaToolRead = `{
+  "type":"object",
+  "description":"Read one registered managed eval tool including its script body.",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string"}},
+  "required":["name"]
+}`
+
+const schemaToolExport = `{
+  "type":"object",
+  "description":"Export all registered managed eval tools, or a selected set, as a portable JSON bundle.",
+  "additionalProperties":false,
+  "properties":{"names":{"type":"array","items":{"type":"string"}}}
+}`
+
+const schemaManagedToolImportObject = `{
+  "type":"object",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string"},"description":{"type":"string"},"script":{"type":"string"},"input_schema":{"type":"object"},"tags":{"type":"array","items":{"type":"string"},"maxItems":32},"read_only":{"type":"boolean"},"destructive":{"type":"boolean"},"timeout_ms":{"type":["integer","string"]},"max_log_entries":{"type":["integer","string"]},"max_result_bytes":{"type":["integer","string"]},"metadata":{"type":"object"},"revision":{"type":"integer"},"created_at":{"type":"string"},"updated_at":{"type":"string"}},
+  "required":["name","script"]
+}`
+
+const schemaToolImport = `{
+  "type":"object",
+  "description":"Import managed eval tools from an exported bundle or a raw tools array.",
+  "additionalProperties":false,
+  "properties":{"tools":{"type":"array","items":` + schemaManagedToolImportObject + `},"bundle":{"type":"object","additionalProperties":false,"properties":{"schema":{"type":"string"},"exported_at":{"type":"string"},"tools":{"type":"array","items":` + schemaManagedToolImportObject + `}},"required":["tools"]},"replace_existing":{"type":"boolean","default":false}}
+}`
+
+const schemaToolDelete = `{
+  "type":"object",
+  "description":"Delete a registered managed eval tool.",
+  "additionalProperties":false,
+  "properties":{"name":{"type":"string"}},
+  "required":["name"]
+}`

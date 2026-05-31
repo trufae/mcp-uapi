@@ -2,13 +2,13 @@
 
 > **Work in progress — Proof of Concept.** APIs, flags, and scripting interfaces may change without notice.
 
-`mcp-uapi` is a Go MCP server that exposes Linux user-mode APIs from `golang.org/x/sys/unix` through a single JavaScript `eval` tool. It is designed for embedded systems testing workflows: attack surface reconnaissance, socket/client experiments, ioctl exploration, ptrace memory probes, fuzzing harnesses, and compact proof-of-concept development.
+`mcp-uapi` is a Go MCP server that exposes Linux user-mode APIs from `golang.org/x/sys/unix` through JavaScript `eval`, plus managed eval tools that agents can register, reuse, export, import, and optionally persist. It is designed for embedded systems testing workflows: attack surface reconnaissance, socket/client experiments, ioctl exploration, ptrace memory probes, fuzzing harnesses, and compact proof-of-concept development.
 
 The server does not implement fuzzing policy, scheduling, minimization, or corpus management. Instead, it provides reliable building blocks that AI agents compose inside the built-in Goja scripting layer.
 
 ## What It Exposes
 
-- Public MCP surface: `eval` only, plus discovery resources and prompts.
+- Public MCP surface: `eval`, managed-tool lifecycle tools, discovery resources, and prompts.
 - Metadata: capabilities, constants, errno decoding, `uname`, process identity, groups, resource limits, resource usage, and live handle state.
 - File descriptors: `open/openat`, `close`, `dup/dup2/dup3`, `pipe/pipe2`, `read`, `write`, `pread`, `pwrite`, `lseek`, `fstat/fstatat`, `stat/statx/statfs/fstatfs`, `readlink/readlinkat`, truncate, sync, nonblocking, and `fcntlInt`.
 - Filesystem mutation: access checks, chmod/chown families, mkdir/mkfifo/mknod families, link/symlink, rename/renameat2, unlink/unlinkat, and rmdir.
@@ -22,10 +22,13 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - eBPF: self-contained `github.com/cilium/ebpf` helpers for maps, built-in program kinds, links, ringbuf/perf readers, feature probes, BTF inspection, and pinning. Scripts do not need clang, bpftool, a C compiler, raw assembly, or ELF loading on the target.
 - Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
 - `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, and `io.*` wrappers, captured logs, timeout enforcement, and JSON results.
+- Managed eval tools: `tool_register`, `tool_update`, `tool_execute`, `tool_list`, `tool_read`, `tool_export`, `tool_import`, and `tool_delete` for saving learned scripts as reusable toolboxes.
 
-Agents should read MCP resources `uapi://agent-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
+Agents should read MCP resources `uapi://agent-guide`, `uapi://tools-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
 
 The documentation resources are backed by the markdown files in `docs/` and embedded into the binary at build time. Reusable eval scripts are backed by individual files in `examples/`, also embedded at build time, and exposed under `uapi://examples/<file>.js`. Start with `uapi://docs` and `uapi://examples` for the resource indexes.
+
+Managed eval tools are registered at runtime by agents. They live in memory by default. Start with `--tool-db /path/to/tools.json` to persist them to an on-device JSON database that is validated and atomically replaced on each mutation.
 
 ## Safety Model
 
@@ -83,6 +86,32 @@ Useful startup flags:
 - `--max-read-bytes`: maximum bytes returned by read-like script helpers. Default: 1 MiB.
 - `--max-buffer-bytes`: maximum managed buffer or mapping size. Default: 16 MiB.
 - `--allow-raw-fd`: permit tools to operate on integer FDs not opened by this server.
+- `--tool-db`: optional JSON database path for persistent registered eval tools.
+
+## Managed Eval Tools
+
+Register a reusable script:
+
+```json
+{
+  "name": "tool_register",
+  "arguments": {
+    "name": "proc.version.read",
+    "description": "Read /proc/version with managed FD cleanup.",
+    "read_only": true,
+    "destructive": false,
+    "script": "const fd = sys.open({path:'/proc/version', flags:'O_RDONLY|O_CLOEXEC'}); try { return sys.read({handle: fd.handle, length:4096, encoding:'utf8'}); } finally { sys.close({handle: fd.handle}); }"
+  }
+}
+```
+
+Run it later:
+
+```json
+{"name": "tool_execute", "arguments": {"name": "proc.version.read", "args": {}}}
+```
+
+Use `tool_list` and `tool_read` for discovery, `tool_update` for revisions, `tool_export` and `tool_import` to share a toolbox, and `tool_delete` to remove a tool. The full guide is available as MCP resource `uapi://tools-guide` and in [docs/TOOLS.md](docs/TOOLS.md).
 
 ## Supported Targets
 

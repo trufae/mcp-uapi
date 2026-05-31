@@ -18,9 +18,10 @@ const defaultMaxReadBytes = 1 << 20
 const defaultMaxBufferBytes = 16 << 20
 
 type Config struct {
-	AllowRawFD     bool
-	MaxReadBytes   uint64
-	MaxBufferBytes uint64
+	AllowRawFD       bool
+	MaxReadBytes     uint64
+	MaxBufferBytes   uint64
+	ToolDatabasePath string
 }
 
 type App struct {
@@ -50,6 +51,8 @@ type App struct {
 	ringReaders           map[string]*ebpfRingReaderEntry
 	nextPerfReaderHandle  uint64
 	perfReaders           map[string]*ebpfPerfReaderEntry
+
+	tools map[string]*managedTool
 }
 
 type fdEntry struct {
@@ -75,6 +78,14 @@ type mmapEntry struct {
 }
 
 func New(config Config) (*App, *server.MCPServer) {
+	app, srv, err := NewWithError(config)
+	if err != nil {
+		panic(err)
+	}
+	return app, srv
+}
+
+func NewWithError(config Config) (*App, *server.MCPServer, error) {
 	if config.MaxReadBytes == 0 {
 		config.MaxReadBytes = defaultMaxReadBytes
 	}
@@ -93,6 +104,10 @@ func New(config Config) (*App, *server.MCPServer) {
 		ebpfLinks:    map[string]*ebpfLinkEntry{},
 		ringReaders:  map[string]*ebpfRingReaderEntry{},
 		perfReaders:  map[string]*ebpfPerfReaderEntry{},
+		tools:        map[string]*managedTool{},
+	}
+	if err := app.initManagedTools(); err != nil {
+		return nil, nil, err
 	}
 	srv := server.NewMCPServer(
 		"mcp-uapi",
@@ -108,11 +123,11 @@ func New(config Config) (*App, *server.MCPServer) {
 	app.registerResources(srv)
 	app.registerPrompts(srv)
 	app.registerTools(srv)
-	return app, srv
+	return app, srv, nil
 }
 
 func serverInstructions() string {
-	return "Start by reading MCP resources uapi://agent-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval scripts from examples/*.js, at build time. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. The only public MCP tool is eval; it runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. sys and uapi are aliases for the synchronous scripting API over golang.org/x/sys/unix and github.com/cilium/ebpf, including managed FDs, buffers, mmap regions, sockets, poll/epoll, vector I/O, process_vm_readv/writev, pidfd, timerfd, xattrs, eventfd/inotify, process helpers, ioctl, and self-contained eBPF map/program/link/event-reader helpers. eBPF programs are authored through built-in script-level kinds such as return, counter, perf_event, ringbuf_event, socket_filter_pass, and socket_filter_drop; the MCP binary compiles these internally and does not require clang, bpftool, a C compiler, an assembler, or ELF loading on the target. The os and io globals expose synchronous Go standard-library style wrappers over package os and package io using the same managed handles and byte encodings; os.Exit, require/import, Node.js modules, and direct MCP resource reads are intentionally unavailable. Inside eval, use sys.capabilities() for the machine-readable capability document. Syscall and eBPF kernel errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, sys.eventfd, sys.ebpfMapCreate, sys.ebpfMapLoadPinned, sys.ebpfProgramLoad, sys.ebpfProgramLoadPinned, sys.ebpfAttachKprobe, sys.ebpfAttachTracepoint, sys.ebpfRingbufReaderCreate, and sys.ebpfPerfReaderCreate; raw integer FDs require --allow-raw-fd."
+	return "Start by reading MCP resources uapi://agent-guide, uapi://tools-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval examples from examples/*.js, at build time. Public MCP tools are eval plus tool_register, tool_update, tool_execute, tool_list, tool_read, tool_export, tool_import, and tool_delete for managing reusable eval scripts. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. eval runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. Registered managed tools are stored in memory by default, or in a JSON database when the server starts with --tool-db. Use tool_register to save a script and its metadata, tool_execute to run it with args, tool_export/tool_import to share toolboxes, and tool_delete to remove tools. Inside eval and registered tool scripts, use sys.capabilities() for the machine-readable capability document. Syscall and eBPF kernel errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, sys.eventfd, sys.ebpfMapCreate, sys.ebpfProgramLoad, and related helpers. Close managed FDs, roots, mappings, eBPF links/programs/maps/readers, and buffers when finished."
 }
 
 func (a *App) Close() {
@@ -156,6 +171,9 @@ func (a *App) Close() {
 	}
 	for name := range a.buffers {
 		delete(a.buffers, name)
+	}
+	for name := range a.tools {
+		delete(a.tools, name)
 	}
 }
 
@@ -324,6 +342,8 @@ func (a *App) stateSnapshot() map[string]any {
 		"ebpf_links":        a.ebpfLinkInfosLocked(),
 		"ebpf_ring_readers": a.ebpfRingReaderInfosLocked(),
 		"ebpf_perf_readers": a.ebpfPerfReaderInfosLocked(),
+		"tool_storage":      a.managedToolStorageLocked(),
+		"tools":             a.managedToolSummariesLocked(nil),
 	}
 }
 

@@ -1,6 +1,6 @@
 # Examples
 
-Read MCP resources such as `uapi://agent-guide` and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`, `os.*`, and `io.*`; helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, and `import` are not available.
+Read MCP resources such as `uapi://agent-guide`, `uapi://tools-guide`, and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`, `os.*`, and `io.*`; helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, and `import` are not available. Use `tool_register` when an example becomes a reusable workflow for later `tool_execute` calls.
 
 Standalone reusable scripts live in `examples/*.js`, are embedded into the binary at build time, and are exposed as MCP resources. Read `uapi://examples` for the index, `uapi://examples/index.json` for metadata, `uapi://examples/001-network-interfaces-ioctl.js` for network interface enumeration through `SIOCGIF*` ioctls, or `uapi://examples/006-strace-syscall-trace.js` for a ptrace-only syscall tracer.
 
