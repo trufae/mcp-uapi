@@ -10,6 +10,14 @@ import (
 func toolSummaryRegistry() []toolSpec {
 	return []toolSpec{
 		{"eval", "Execute JavaScript with the sys/uapi scripting layer. Read MCP resources outside eval; inside scripts use sys.* or uapi.* only, with no uapi.request/fetch helper.", schemaEval, false, true, nil},
+		{"tool_register", "Register a reusable eval script as a managed tool. Tools live in memory unless --tool-db is configured.", schemaToolRegister, false, true, nil},
+		{"tool_update", "Update an existing managed eval tool's script, metadata, defaults, or annotations.", schemaToolUpdate, false, true, nil},
+		{"tool_execute", "Execute a registered managed eval tool by name with caller-provided args.", schemaToolExecute, false, true, nil},
+		{"tool_list", "List registered managed eval tools without returning script bodies.", schemaToolList, true, false, nil},
+		{"tool_read", "Read one registered managed eval tool, including its script body.", schemaToolRead, true, false, nil},
+		{"tool_export", "Export registered managed eval tools as a portable JSON bundle.", schemaToolExport, true, false, nil},
+		{"tool_import", "Import managed eval tools from a portable JSON bundle or tool array.", schemaToolImport, false, true, nil},
+		{"tool_delete", "Delete a registered managed eval tool.", schemaToolDelete, false, true, nil},
 	}
 }
 
@@ -137,6 +145,22 @@ func (a *App) handlerForTool(name string) server.ToolHandlerFunc {
 		return a.handlePrctl
 	case "eval":
 		return a.handleEval
+	case "tool_register":
+		return a.handleToolRegister
+	case "tool_update":
+		return a.handleToolUpdate
+	case "tool_execute":
+		return a.handleToolExecute
+	case "tool_list":
+		return a.handleToolList
+	case "tool_read":
+		return a.handleToolRead
+	case "tool_export":
+		return a.handleToolExport
+	case "tool_import":
+		return a.handleToolImport
+	case "tool_delete":
+		return a.handleToolDelete
 	default:
 		return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 			return toolError(&unknownToolError{name: name})

@@ -71,6 +71,10 @@ func (a *App) handleEval(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
+	return a.runEval(ctx, args)
+}
+
+func (a *App) runEval(ctx context.Context, args evalArgs) (*mcp.CallToolResult, error) {
 	if strings.TrimSpace(args.Script) == "" {
 		return toolError(errors.New("script is required"))
 	}

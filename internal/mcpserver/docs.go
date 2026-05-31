@@ -69,6 +69,13 @@ func documentAssets() []documentAsset {
 			Aliases:     []string{"uapi://docs/SCRIPTING.md"},
 		},
 		{
+			Path:        "docs/TOOLS.md",
+			URI:         "uapi://tools-guide",
+			Name:        "Managed eval tools guide",
+			Description: "Guide to registering, executing, exporting, importing, and persisting reusable eval scripts.",
+			Aliases:     []string{"uapi://docs/TOOLS.md"},
+		},
+		{
 			Path:        "docs/EXAMPLES.md",
 			URI:         "uapi://examples-guide",
 			Name:        "Linux UAPI example guide",

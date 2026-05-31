@@ -20,6 +20,7 @@ func main() {
 		allowRawFD     = flag.Bool("allow-raw-fd", false, "Allow tools to operate on integer FDs not opened by this server")
 		maxReadBytes   = flag.Uint64("max-read-bytes", 1<<20, "Maximum bytes returned by read-like tool calls")
 		maxBufferBytes = flag.Uint64("max-buffer-bytes", 16<<20, "Maximum size of a managed user-space buffer or mmap region")
+		toolDB         = flag.String("tool-db", "", "Optional JSON database path for persistent registered eval tools")
 		showVersion    = flag.Bool("version", false, "Print version and exit")
 	)
 	flag.Parse()
@@ -29,11 +30,16 @@ func main() {
 		return
 	}
 
-	app, srv := mcpserver.New(mcpserver.Config{
-		AllowRawFD:     *allowRawFD,
-		MaxReadBytes:   *maxReadBytes,
-		MaxBufferBytes: *maxBufferBytes,
+	app, srv, err := mcpserver.NewWithError(mcpserver.Config{
+		AllowRawFD:       *allowRawFD,
+		MaxReadBytes:     *maxReadBytes,
+		MaxBufferBytes:   *maxBufferBytes,
+		ToolDatabasePath: *toolDB,
 	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "mcp-uapi startup error: %v\n", err)
+		os.Exit(1)
+	}
 	defer app.Close()
 
 	switch *transport {

@@ -10,11 +10,13 @@ Risks include:
 - Ptrace reads/writes of processes permitted by kernel policy.
 - Arbitrary ioctl requests against device files or sockets.
 - Memory mapping and protection changes inside the MCP server process.
+- Runtime-registered eval tools that can preserve learned workflows, including destructive ones, across sessions when `--tool-db` is enabled.
 
 Recommended deployment:
 
 - Run in a VM, container, or lab host where the MCP client is trusted.
 - Use the default managed-handle mode; avoid `--allow-raw-fd` unless needed.
 - Keep `--listen` bound to localhost unless remote access is intentionally required and protected by the surrounding environment.
+- Treat `--tool-db` files as trusted local state. Review imported bundles before using `tool_import`, especially when `replace_existing` is enabled.
 - Prefer nonblocking sockets and bounded `poll`/`epoll_wait` timeouts in automated loops.
 - Keep `--max-read-bytes` and `--max-buffer-bytes` conservative for remote agents.
