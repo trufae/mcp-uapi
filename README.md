@@ -191,30 +191,7 @@ try {
 }
 ```
 
-Trace a few syscalls from an allowed process:
-
-```javascript
-const src = os.readFile({name: 'examples/006-strace-syscall-trace.js', encoding: 'utf8'});
-const run = new Function('args', 'console', 'print', 'sys', 'uapi', 'os', 'io', src.data_utf8);
-return run({pid: args.pid, max_events: 8, wait_timeout_ms: 1000}, console, print, sys, uapi, os, io);
-```
-
-Open a TCP connection and exchange bytes using the `net.*` wrappers:
-
-```javascript
-const listener = net.listen({network: 'tcp', address: '127.0.0.1:0'});
-const addr = net.listenerAddr({listener: listener.listener}).addr.address;
-const client = net.dial({network: 'tcp', address: addr, timeout_ms: 1000});
-const server = net.listenerAccept({listener: listener.listener, timeout_ms: 1000});
-net.connWrite({conn: client.conn, data_utf8: 'ping'});
-const got = net.connRead({conn: server.conn, length: 4, encoding: 'utf8', timeout_ms: 1000});
-net.connClose({conn: client.conn});
-net.connClose({conn: server.conn});
-net.listenerClose({listener: listener.listener});
-return got;
-```
-
-Scan a host for open TCP ports (see `uapi://examples/010-net-tcp-port-scanner.js`):
+Scan a host for open TCP ports using the `net.*` wrappers (see `uapi://examples/010-net-tcp-port-scanner.js`):
 
 ```javascript
 const ports = [22, 80, 443, 8080];
