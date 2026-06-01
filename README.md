@@ -3,7 +3,7 @@
 > **Proof-of-concept. Hobby project. Likely buggy. Almost entirely vibe-coded in a few days. Just for the craic.**
 
 <p align="center">
-  <img src="assets/comic.png" alt="mcp-uapi comic" width="600">
+  <img src="assets/comic.png" alt="mcp-uapi comic" width="100%">
 </p>
 
 ---
@@ -156,3 +156,9 @@ Because when you're deep in a reversing session at 2 AM and your agent needs to 
 ## Contributing
 
 This is a messy proof-of-concept. Pull requests, ideas, war stories, and collaboration are all very welcome. Found a bug on your exotic arch? Open an issue. Want to add a syscall wrapper? Send a PR. Just want to share what you built with it? I'd love to hear about it.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE) for the full text.
