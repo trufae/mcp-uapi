@@ -2,6 +2,10 @@
 
 > **Proof-of-concept. Hobby project. Likely buggy. Almost entirely vibe-coded in a few days. Just for the craic.**
 
+<p align="center">
+  <img src="assets/comic.png" alt="mcp-uapi comic" width="600">
+</p>
+
 ---
 
 It's late. You're staring at an embedded Linux device — a router, an IoT gateway, some weird MIPS box pulled from a rack. You need to reverse a complex IPC protocol, poke at ioctls, trace syscalls, spray sockets, attach eBPF probes. The device ships a minimal shell. No `lsof`. No `strace`. `busybox` if you're lucky. You could spend hours cross-compiling static binaries, or you could drop one binary on the box and let your AI agent figure out the rest.
