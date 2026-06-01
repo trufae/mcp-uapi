@@ -1,236 +1,154 @@
 # mcp-uapi
 
-> **Work in progress — Proof of Concept.** APIs, flags, and scripting interfaces may change without notice.
+> **Proof-of-concept. Hobby project. Likely buggy. Almost entirely vibe-coded in a few days. Just for the craic.**
 
-`mcp-uapi` is a Go MCP server that exposes Linux user-mode APIs from `golang.org/x/sys/unix` through JavaScript `eval`, plus managed eval tools that agents can register, reuse, export, import, and optionally persist. It is designed for embedded systems testing workflows: attack surface reconnaissance, socket/client experiments, ioctl exploration, ptrace memory probes, fuzzing harnesses, and compact proof-of-concept development.
+---
 
-The server does not implement fuzzing policy, scheduling, minimization, or corpus management. Instead, it provides reliable building blocks that AI agents compose inside the built-in Goja scripting layer.
+It's late. You're staring at an embedded Linux device — a router, an IoT gateway, some weird MIPS box pulled from a rack. You need to reverse a complex IPC protocol, poke at ioctls, trace syscalls, spray sockets, attach eBPF probes. The device ships a minimal shell. No `lsof`. No `strace`. `busybox` if you're lucky. You could spend hours cross-compiling static binaries, or you could drop one binary on the box and let your AI agent figure out the rest.
 
-## What It Exposes
+**mcp-uapi** is that bridge. An MCP server that exposes raw Linux user-mode APIs through a JavaScript eval layer so AI agents can reach straight into the kernel — sockets, ptrace, ioctl, mmap, eBPF, epoll, inotify, netlink primitives — without a C compiler, without ELF loading, without toolchain hell. Drop the binary on the box, point your agent at it, and start interrogating the system.
 
-- Public MCP surface: `eval`, managed-tool lifecycle tools, discovery resources, and prompts.
-- Metadata: capabilities, constants, errno decoding, `uname`, process identity, groups, resource limits, resource usage, and live handle state.
-- File descriptors: `open/openat`, `close`, `dup/dup2/dup3`, `pipe/pipe2`, `read`, `write`, `pread`, `pwrite`, `lseek`, `fstat/fstatat`, `stat/statx/statfs/fstatfs`, `readlink/readlinkat`, truncate, sync, nonblocking, and `fcntlInt`.
-- Filesystem mutation: access checks, chmod/chown families, mkdir/mkfifo/mknod families, link/symlink, rename/renameat2, unlink/unlinkat, and rmdir.
-- Managed buffers: bounded byte buffers for ioctl payloads, socket sends, file writes, and explicit test data.
-- Memory mappings: anonymous and file-backed `mmap`, `munmap`, `mprotect`, `msync`, `madvise`, mapping read/write.
-- Networking: socket, socketpair, bind/connect/listen/accept, send/recv, socket names, integer sockopts, shutdown.
-- Readiness and events: `poll`, `epoll_create`, `epoll_ctl`, `epoll_wait`, `eventfd`, `inotify`, `memfd_create`, and close-range helpers.
-- Process control: `kill`, `wait4`, `prctl`, `ptrace` attach/detach/read/write/continue/syscall/get-registers/set-options.
-- Extended attributes and transfer: get/list/set/remove xattr families, `sendfile`, and `copy_file_range`.
-- `ioctl`: integer argument or pointer to a managed buffer range.
-- eBPF: self-contained `github.com/cilium/ebpf` helpers for maps, built-in program kinds, links, ringbuf/perf readers, feature probes, BTF inspection, and pinning. Scripts do not need clang, bpftool, a C compiler, raw assembly, or ELF loading on the target.
-- Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
-- `net.*`: package `net` style wrappers for TCP, UDP, Unix domain sockets, DNS resolution (host, IP, CNAME, MX, NS, TXT, SRV, port, reverse), interface enumeration, IP/CIDR parsing, and managed `net.Conn`/`net.Listener`/`net.PacketConn` handles with deadline support. `io.*` endpoints accept `{conn: "name"}` for stream copy and read/write over any managed connection.
-- `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, `io.*`, and `net.*` wrappers, captured logs, timeout enforcement, and JSON results.
-- Managed eval tools: `tool_register`, `tool_update`, `tool_execute`, `tool_list`, `tool_read`, `tool_export`, `tool_import`, and `tool_delete` for saving learned scripts as reusable toolboxes.
+It's built for hackers. Embedded pentesters. Reversing engineers who need to give their agents real teeth on real hardware, right now, with zero ceremony.
 
-Agents should read MCP resources `uapi://agent-guide`, `uapi://tools-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
+---
 
-The documentation resources are backed by the markdown files in `docs/` and embedded into the binary at build time. Reusable eval scripts are backed by individual files in `examples/`, also embedded at build time, and exposed under `uapi://examples/<file>.js`. Start with `uapi://docs` and `uapi://examples` for the resource indexes.
+## What's Under The Hood
 
-Managed eval tools are registered at runtime by agents. They live in memory by default. Start with `--tool-db /path/to/tools.json` to persist them to an on-device JSON database that is validated and atomically replaced on each mutation.
+A single Go binary. No runtime dependencies. Cross-compiles to **13 Linux targets** (386, amd64, arm, arm64, loong64, mips, mips64, mips64le, mipsle, ppc64, ppc64le, riscv64, s390x).
 
-## Safety Model
+Agents connect over MCP (stdio or HTTP) and get access to:
 
-This server intentionally exposes direct Linux syscalls. It can create files, open sockets, signal processes, attach to ptrace-allowed processes, mutate mappings, and issue arbitrary ioctls. Run it only in an isolated lab environment with a trusted MCP client.
+- **JavaScript eval** via Goja — with `sys.*`, `os.*`, `io.*`, `net.*` globals
+- **File descriptors & filesystem** — open/read/write/mmap/stat/xattr/sendfile, the works
+- **Networking** — sockets, socketpair, TCP/UDP/Unix, DNS resolution, interface enumeration
+- **Process introspection** — ptrace attach/read/write/registers, process memory scanning
+- **eBPF** — load and attach programs without clang/bpftool/C compiler/ELF on target
+- **ioctl** — arbitrary ioctls with managed buffer marshalling
+- **epoll / inotify / eventfd / memfd / poll** — readiness, events, and IPC primitives
+- **Managed eval tools** — register, export, and share reusable scripts as toolboxes
 
-Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `os.open`, `os.create`, `os.openRoot`, `sys.socket`, `sys.socketpair`, `net.dial`, `net.listen`, `net.listenPacket`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs. Close `net.Conn`, `net.Listener`, and `net.PacketConn` handles explicitly with `net.connClose`, `net.listenerClose`, and `net.packetClose` when done.
+---
 
-eBPF loading and attachment can observe or affect kernel execution depending on program type, return value, and hook. Kernel policy and capabilities still apply. Prefer explicit cleanup with `sys.ebpfLinkClose`, `sys.ebpfProgramClose`, `sys.ebpfMapClose`, and reader close helpers unless a pin is intentionally used to persist an object.
+## Why Go?
 
-Linux syscall failures are returned as structured data instead of MCP tool errors:
+Embedded Linux devices are a mess of libc variants — glibc, musl, uclibc-ng, you name it. Go sidesteps the problem entirely: it compiles to **static binaries with syscalls issued directly against the kernel**, no libc dependency in sight. `golang.org/x/sys/unix` provides a massive surface of Linux syscall wrappers — everything from `prctl` to `ptrace` to `copy_file_range` — without touching a C toolchain. cgo is disabled, so the binary has no dynamic linkage whatsoever. Drop it on a box running some ancient Buildroot snapshot from 2017 and it just works.
 
-```json
-{"ok": false, "errno": 2, "errno_name": "ENOENT", "error": "no such file or directory"}
-```
+---
 
-Malformed script arguments, unknown handles, invalid ranges, and oversized reads are returned as eval errors.
+## The Tool Registry — Your Agent's Arsenal
+
+`eval` is great for one-shots, but after the third time your agent writes the same ptrace memory scanner, it gets old. The tool registry solves this: any script your agent figures out can be **saved as a named, reusable tool** with `tool_register`, and from then on it's a single `tool_execute` call away.
+
+The real power is **portability**. `tool_export` dumps your toolbox as a JSON bundle — share it with a teammate, ship it to another device, check it into a repo. `tool_import` loads it back in. Your agent builds up a personalized kit over a session, exports it, and carries it to the next target.
+
+Picture this: you turn an agent loose on a box. No compiler. No build environment. No package manager. It probes the kernel, writes a few throwaway scripts to figure out the IPC protocol, and when it finds something that works, it registers it. An hour later it's got a custom toolbox — syscall tracers, ioctl fuzzers, network scanners — all validated on that exact kernel, on that exact arch. Then it exports the whole thing as JSON. Next device, next gig, same kit, zero setup.
+
+---
 
 ## Quick Start
 
-Install the local Go toolchain and dependencies:
+> You probably don't have time to compile. Grab a pre-built binary from the [releases](https://github.com/marioballano/mcp-uapi/releases) and skip straight to running it.
+
+If you insist on building from source:
 
 ```bash
+git clone https://github.com/nullsub/mcp-uapi.git
 cd mcp-uapi
 ./install-deps.sh
-```
-
-Build:
-
-```bash
 ./scripts/build.sh
 ```
 
-Run tests:
-
-```bash
-./scripts/test.sh
-```
-
-Run over stdio for a local MCP client:
+Run over stdio for a local agent:
 
 ```bash
 ./bin/mcp-uapi --transport stdio
 ```
 
-Run Streamable HTTP for remote agents:
+Or stream over HTTP for remote agents:
 
 ```bash
 ./bin/mcp-uapi --transport http --listen 127.0.0.1:8080 --endpoint /mcp
+# → http://127.0.0.1:8080/mcp
 ```
 
-The HTTP MCP endpoint will be `http://127.0.0.1:8080/mcp`.
-
-Useful startup flags:
-
-- `--max-read-bytes`: maximum bytes returned by read-like script helpers. Default: 1 MiB.
-- `--max-buffer-bytes`: maximum managed buffer or mapping size. Default: 16 MiB.
-- `--allow-raw-fd`: permit tools to operate on integer FDs not opened by this server.
-- `--tool-db`: optional JSON database path for persistent registered eval tools.
-
-## Managed Eval Tools
-
-Register a reusable script:
-
-```json
-{
-  "name": "tool_register",
-  "arguments": {
-    "name": "proc.version.read",
-    "description": "Read /proc/version with managed FD cleanup.",
-    "read_only": true,
-    "destructive": false,
-    "script": "const fd = sys.open({path:'/proc/version', flags:'O_RDONLY|O_CLOEXEC'}); try { return sys.read({handle: fd.handle, length:4096, encoding:'utf8'}); } finally { sys.close({handle: fd.handle}); }"
-  }
-}
-```
-
-Run it later:
-
-```json
-{"name": "tool_execute", "arguments": {"name": "proc.version.read", "args": {}}}
-```
-
-Use `tool_list` and `tool_read` for discovery, `tool_update` for revisions, `tool_export` and `tool_import` to share a toolbox, and `tool_delete` to remove a tool. The full guide is available as MCP resource `uapi://tools-guide` and in [docs/TOOLS.md](docs/TOOLS.md).
-
-## Supported Targets
-
-All targets are Linux-only. Cross builds are pure Go with cgo disabled. The eBPF API is compiled into the same binary on these targets, but runtime support depends on the deployed kernel, enabled BPF features, privilege policy, memlock accounting, and bpffs availability.
-
-| Target              | Binary                         |
-|---------------------|--------------------------------|
-| `linux/386`         | `bin/mcp-uapi-linux-386`       |
-| `linux/amd64`       | `bin/mcp-uapi-linux-amd64`     |
-| `linux/arm`         | `bin/mcp-uapi-linux-arm`       |
-| `linux/arm64`       | `bin/mcp-uapi-linux-arm64`     |
-| `linux/loong64`     | `bin/mcp-uapi-linux-loong64`   |
-| `linux/mips`        | `bin/mcp-uapi-linux-mips`      |
-| `linux/mips64`      | `bin/mcp-uapi-linux-mips64`    |
-| `linux/mips64le`    | `bin/mcp-uapi-linux-mips64le`  |
-| `linux/mipsle`      | `bin/mcp-uapi-linux-mipsle`    |
-| `linux/ppc64`       | `bin/mcp-uapi-linux-ppc64`     |
-| `linux/ppc64le`     | `bin/mcp-uapi-linux-ppc64le`   |
-| `linux/riscv64`     | `bin/mcp-uapi-linux-riscv64`   |
-| `linux/s390x`       | `bin/mcp-uapi-linux-s390x`     |
-
-Build a specific target:
+Cross-compile for your target:
 
 ```bash
-./scripts/build-target.sh linux/arm64
-./scripts/build-target.sh linux/arm
-./scripts/build-target.sh linux/riscv64
+./scripts/build-target.sh linux/arm64    # your Raspberry Pi
+./scripts/build-target.sh linux/mips     # that weird router
+./scripts/build-all-targets.sh           # all 13 targets at once
 ```
 
-Build all targets at once:
+Agents should read `uapi://agent-guide` and `uapi://scripting-api` as MCP resources right after connecting. Use `sys.capabilities()` inside eval to probe what's available.
 
-```bash
-./scripts/build-all-targets.sh
-```
+---
 
-For eBPF on embedded targets such as ARM64 routers, build and deploy only the MCP binary. The target does not need a C compiler or eBPF toolchain. Use `sys.ebpfInfo()` and `sys.ebpfFeatureProbe()` from eval to discover what the running kernel permits.
+## What You Can Build
 
-The eBPF helpers cross-build for every target above. On `linux/mips`, `sys.ebpfPerfReaderCreate` returns `ErrNotSupported`; use ring buffers or map polling for event delivery on that target.
+- **Syscall tracers** — ptrace-based strace clones, no compiler needed
+- **Memory scrapers** — dump environment strings, CLI args, or crypto material from running processes
+- **Network enumerators** — port scanners, interface walkers, raw socket experiments
+- **eBPF probes** — socket filters, process monitors, kprobes — loaded without clang or ELF
+- **IPC fuzzers** — spray ioctls at drivers, hammer Unix sockets, mutate netlink messages
+- **Protocol reversers** — capture, replay, and dissect weird wire formats with agent-driven loops
+- **Persistent toolkits** — register your go-to recon scripts once, `tool_export`, carry them everywhere
 
-## Examples
-
-Create a local socketpair and exchange bytes:
+Here's what a ptrace memory probe looks like — attach to a process, grab its stack pointer, read a chunk, detach, all from a JSON call your agent fires off:
 
 ```javascript
-const pair = sys.socketpair({handles: ['a', 'b']});
-sys.write({handle: 'a', data_utf8: 'ping'});
-const got = sys.read({handle: 'b', length: 4, encoding: 'utf8'});
-sys.close({handle: 'a'});
-sys.close({handle: 'b'});
-return got;
-```
-
-Prepare an ioctl buffer and call `FIONREAD` on a socket:
-
-```javascript
-sys.bufferAlloc({name: 'ioctl', size: 8});
-const ioctl = sys.ioctl({
-  handle: args.socket,
-  request: 'FIONREAD',
-  buffer: 'ioctl',
-  buffer_length: 4,
-});
-const argp = sys.bufferRead({name: 'ioctl', length: 4, encoding: 'hex'});
-return {ioctl, argp};
-```
-
-Attach to a permitted child process and read memory:
-
-```javascript
-const attach = sys.ptraceAttach({pid: args.pid, wait: true, timeout_ms: 5000});
+// Attach to a process and peek at its stack
+const pid = args.pid;
+const attach = sys.ptraceAttach({pid, wait: true, timeout_ms: 3000});
 if (!attach.ok) return attach;
+
 try {
-  return sys.ptraceRead({pid: args.pid, address: args.address, length: 64, encoding: 'hex'});
-} finally {
-  sys.ptraceDetach({pid: args.pid});
+  const regs = sys.ptraceGetRegs({pid});
+  if (!regs.ok) return regs;
+
+  // Read 128 bytes from wherever the stack pointer is pointing
+  const sp = regs.registers.rsp || regs.registers.sp;
+  const chunk = sys.ptraceRead({
+    pid,
+    address: sp,
+    length: 128,
+    encoding: 'hex'
+  });
+
+  sys.ptraceDetach({pid});
+  return {sp, arch: regs.arch, stack_hex: chunk};
+} catch (e) {
+  sys.ptraceDetach({pid});
+  throw e;
 }
 ```
 
-Scan a host for open TCP ports using the `net.*` wrappers (see `uapi://examples/010-net-tcp-port-scanner.js`):
+More patterns in [examples/](examples/) and [docs/](docs/).
 
-```javascript
-const ports = [22, 80, 443, 8080];
-return ports.map(port => {
-  const addr = net.joinHostPort({host: args.target, port}).address;
-  const d = net.dial({network: 'tcp', address: addr, timeout_ms: 500});
-  if (d.ok) net.connClose({conn: d.conn});
-  return {port, open: d.ok, error: d.error || ''};
-});
+## CLI — Knobs & Switches
+
+```
+mcp-uapi [flags]
 ```
 
-Copy a file with the `os` and `io` scripting globals:
+| Flag | Default | What It Does |
+|------|---------|---------------|
+| `--transport` | `stdio` | How the agent talks to you. `stdio` for local, `http` for remote boxes you scp'd to |
+| `--listen` | `127.0.0.1:8080` | HTTP listen address. Lock it to localhost unless you know what you're doing |
+| `--endpoint` | `/mcp` | MCP endpoint path on the HTTP server |
+| `--allow-raw-fd` | `false` | Let the agent mess with FDs it didn't open. Off by default for a reason |
+| `--max-read-bytes` | `1 MiB` | Cap on what `sys.read` and friends will hand back. Bump it if you're dumping big regions |
+| `--max-buffer-bytes` | `16 MiB` | Cap on managed buffers and mmap regions. Bigger ioctl payloads, bigger maps |
+| `--tool-db` | (none) | Path to a JSON file for persisting registered tools. No path = tools live in memory, gone on restart |
+| `--version` | — | Print the version and bail |
 
-```javascript
-os.writeFile({name: args.path, data_utf8: 'hello', perm: '0600'});
-const src = os.open({name: args.path, handle: 'src'});
-const dst = os.create({name: args.copy, handle: 'dst'});
-try {
-  const copied = io.copy({dst: {handle: 'dst'}, src: {handle: 'src'}});
-  const got = os.readFile({name: args.copy, encoding: 'utf8'});
-  return {copied, got};
-} finally {
-  os.fileClose({handle: 'src'});
-  os.fileClose({handle: 'dst'});
-}
-```
+---
 
-Load a self-contained eBPF socket filter without a target-side compiler:
+## Why
 
-```javascript
-const prog = sys.ebpfProgramLoad({kind: "socket_filter_pass", handle: "passAll"});
-if (!prog.ok) return prog;
-const pair = sys.socketpair({type: "SOCK_DGRAM|SOCK_CLOEXEC", handles: ["left", "right"]});
-const attach = sys.ebpfAttachSocketFilter({program: "passAll", handle: "left"});
-return {prog, attach, info: sys.ebpfInfo()};
-```
+Because when you're deep in a reversing session at 2 AM and your agent needs to call `ptrace(PTRACE_ATTACH, ...)` or load a socket filter on a MIPS box, you don't want to explain cross-compilation to an LLM. You want a binary you can scp over and a JSON interface the agent already knows how to speak.
 
-More ready-to-run scripts live in [examples/](examples/).
+---
 
-## Documentation
+## Contributing
 
-Reference documentation lives in [docs/](docs/).
+This is a messy proof-of-concept. Pull requests, ideas, war stories, and collaboration are all very welcome. Found a bug on your exotic arch? Open an issue. Want to add a syscall wrapper? Send a PR. Just want to share what you built with it? I'd love to hear about it.
