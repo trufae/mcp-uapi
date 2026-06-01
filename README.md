@@ -12,7 +12,7 @@ It's late. You're staring at an embedded Linux device — a router, an IoT gatew
 
 **mcp-uapi** is that bridge. An MCP server that exposes raw Linux user-mode APIs through a JavaScript eval layer so AI agents can reach straight into the kernel — sockets, ptrace, ioctl, mmap, eBPF, epoll, inotify, netlink primitives — without a C compiler, without ELF loading, without toolchain hell. Drop the binary on the box, point your agent at it, and start interrogating the system.
 
-It's built for hackers. Embedded pentesters. Reversing engineers who need to give their agents real teeth on real hardware, right now, with zero ceremony.
+It's built for hackers. Embedded pentesters. Reverse engineers who need to give their agents real teeth on real hardware, right now, with zero ceremony.
 
 ---
 
@@ -56,7 +56,7 @@ Picture this: you turn an agent loose on a box. No compiler. No build environmen
 If you insist on building from source:
 
 ```bash
-git clone https://github.com/nullsub/mcp-uapi.git
+git clone https://github.com/marioballano/mcp-uapi.git
 cd mcp-uapi
 ./install-deps.sh
 ./scripts/build.sh
