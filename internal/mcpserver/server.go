@@ -41,6 +41,13 @@ type App struct {
 	nextProcessHandle uint64
 	processes         map[string]*processEntry
 
+	nextNetConnHandle     uint64
+	netConns              map[string]*netConnEntry
+	nextNetListenerHandle uint64
+	netListeners          map[string]*netListenerEntry
+	nextNetPacketHandle   uint64
+	netPacketConns        map[string]*netPacketConnEntry
+
 	nextEBPFMapHandle     uint64
 	ebpfMaps              map[string]*ebpfMapEntry
 	nextEBPFProgramHandle uint64
@@ -93,18 +100,21 @@ func NewWithError(config Config) (*App, *server.MCPServer, error) {
 		config.MaxBufferBytes = defaultMaxBufferBytes
 	}
 	app := &App{
-		config:       config,
-		fds:          map[string]*fdEntry{},
-		buffers:      map[string]*bufferEntry{},
-		mappings:     map[string]*mmapEntry{},
-		roots:        map[string]*rootEntry{},
-		processes:    map[string]*processEntry{},
-		ebpfMaps:     map[string]*ebpfMapEntry{},
-		ebpfPrograms: map[string]*ebpfProgramEntry{},
-		ebpfLinks:    map[string]*ebpfLinkEntry{},
-		ringReaders:  map[string]*ebpfRingReaderEntry{},
-		perfReaders:  map[string]*ebpfPerfReaderEntry{},
-		tools:        map[string]*managedTool{},
+		config:         config,
+		fds:            map[string]*fdEntry{},
+		buffers:        map[string]*bufferEntry{},
+		mappings:       map[string]*mmapEntry{},
+		roots:          map[string]*rootEntry{},
+		processes:      map[string]*processEntry{},
+		netConns:       map[string]*netConnEntry{},
+		netListeners:   map[string]*netListenerEntry{},
+		netPacketConns: map[string]*netPacketConnEntry{},
+		ebpfMaps:       map[string]*ebpfMapEntry{},
+		ebpfPrograms:   map[string]*ebpfProgramEntry{},
+		ebpfLinks:      map[string]*ebpfLinkEntry{},
+		ringReaders:    map[string]*ebpfRingReaderEntry{},
+		perfReaders:    map[string]*ebpfPerfReaderEntry{},
+		tools:          map[string]*managedTool{},
 	}
 	if err := app.initManagedTools(); err != nil {
 		return nil, nil, err
@@ -127,7 +137,7 @@ func NewWithError(config Config) (*App, *server.MCPServer, error) {
 }
 
 func serverInstructions() string {
-	return "Start by reading MCP resources uapi://agent-guide, uapi://tools-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval examples from examples/*.js, at build time. Public MCP tools are eval plus tool_register, tool_update, tool_execute, tool_list, tool_read, tool_export, tool_import, and tool_delete for managing reusable eval scripts. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. eval runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, and io. Registered managed tools are stored in memory by default, or in a JSON database when the server starts with --tool-db. Use tool_register to save a script and its metadata, tool_execute to run it with args, tool_export/tool_import to share toolboxes, and tool_delete to remove tools. Inside eval and registered tool scripts, use sys.capabilities() for the machine-readable capability document. Syscall and eBPF kernel errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, sys.eventfd, sys.ebpfMapCreate, sys.ebpfProgramLoad, and related helpers. Close managed FDs, roots, mappings, eBPF links/programs/maps/readers, and buffers when finished."
+	return "Start by reading MCP resources uapi://agent-guide, uapi://tools-guide, uapi://scripting-api, uapi://api-reference, uapi://api, uapi://examples, and uapi://capabilities using the MCP client resource-read operation. Documentation is embedded from docs/*.md and docs/api/*.md, and reusable eval examples from examples/*.js, at build time. Public MCP tools are eval plus tool_register, tool_update, tool_execute, tool_list, tool_read, tool_export, tool_import, and tool_delete for managing reusable eval scripts. MCP resources are not readable from JavaScript eval: do not call uapi.request, sys.request, fetch, require, or import. eval runs JavaScript inside a function body with globals args, console, print, sys, uapi, os, io, and net. Registered managed tools are stored in memory by default, or in a JSON database when the server starts with --tool-db. Use tool_register to save a script and its metadata, tool_execute to run it with args, tool_export/tool_import to share toolboxes, and tool_delete to remove tools. Inside eval and registered tool scripts, use sys.capabilities() for the machine-readable capability document. Syscall and eBPF kernel errno returns are data with ok=false, errno, errno_name, and error; malformed script arguments are eval errors. Prefer managed handles returned by sys.open, os.open, os.create, os.openRoot, sys.socket, sys.socketpair, net.dial, net.listen, net.listenPacket, sys.epollCreate, sys.bufferAlloc, sys.mmap, sys.memfdCreate, sys.timerfdCreate, sys.pidfdOpen, sys.eventfd, sys.ebpfMapCreate, sys.ebpfProgramLoad, and related helpers. Close managed FDs, net connections/listeners/packet connections, roots, mappings, eBPF links/programs/maps/readers, and buffers when finished."
 }
 
 func (a *App) Close() {
@@ -156,6 +166,18 @@ func (a *App) Close() {
 	for handle, mapping := range a.mappings {
 		_ = unix.Munmap(mapping.Data)
 		delete(a.mappings, handle)
+	}
+	for handle, packet := range a.netPacketConns {
+		_ = packet.PacketConn.Close()
+		delete(a.netPacketConns, handle)
+	}
+	for handle, listener := range a.netListeners {
+		_ = listener.Listener.Close()
+		delete(a.netListeners, handle)
+	}
+	for handle, conn := range a.netConns {
+		_ = conn.Conn.Close()
+		delete(a.netConns, handle)
 	}
 	for handle, fd := range a.fds {
 		_ = unix.Close(fd.FD)
@@ -337,6 +359,9 @@ func (a *App) stateSnapshot() map[string]any {
 		"mappings":          a.mappingInfosLocked(),
 		"roots":             rootInfosLocked(a.roots),
 		"processes":         processInfosLocked(a.processes),
+		"net_connections":   netConnInfosLocked(a.netConns),
+		"net_listeners":     netListenerInfosLocked(a.netListeners),
+		"net_packet_conns":  netPacketConnInfosLocked(a.netPacketConns),
 		"ebpf_maps":         a.ebpfMapInfosLocked(),
 		"ebpf_programs":     a.ebpfProgramInfosLocked(),
 		"ebpf_links":        a.ebpfLinkInfosLocked(),

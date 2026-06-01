@@ -38,11 +38,11 @@ Fields typed as integer or string accept numeric values, hex strings, or constan
 {"flags":"O_RDWR|O_CREAT|O_CLOEXEC"}
 ```
 
-Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `timerfd`, `signalfd`, `memfd`, `pidfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `priority`, `clock`, `random`, `fadvise`, `fallocate`, `sync_file_range`, `splice`, `rwf`, `openat2`, `flock`, `syscall`, `ioctl`, `prctl`, `ebpf`, `go_os`, `go_io`, and `errno`.
+Use `sys.constants({group})` or `sys.constant("NAME")` for supported groups: `open_flags`, `socket`, `access`, `at`, `fcntl`, `file_type`, `mmap`, `poll`, `epoll`, `eventfd`, `timerfd`, `signalfd`, `memfd`, `pidfd`, `close_range`, `inotify`, `statx`, `rename`, `signal`, `wait`, `rlimit`, `priority`, `clock`, `random`, `fadvise`, `fallocate`, `sync_file_range`, `splice`, `rwf`, `openat2`, `flock`, `syscall`, `ioctl`, `prctl`, `ebpf`, `go_os`, `go_io`, `go_net`, and `errno`.
 
 ## Handles
 
-Managed handles are returned by script helpers that create resources. Use `handle` for normal FD helpers, `mapping` for memory mappings, `name` for buffers, `root` or `handle` for `os.Root` wrappers, and process handles for `os.Process` wrappers. Raw FDs require `--allow-raw-fd`.
+Managed handles are returned by script helpers that create resources. Use `handle` for normal FD helpers, `conn` for `net.Conn`, `listener` for `net.Listener`, `packet` for `net.PacketConn`, `mapping` for memory mappings, `name` for buffers, `root` or `handle` for `os.Root` wrappers, and process handles for `os.Process` wrappers. Raw FDs require `--allow-raw-fd`.
 
 ## Scripting Groups
 
@@ -60,10 +60,11 @@ Managed handles are returned by script helpers that create resources. Use `handl
 - eBPF: `sys.ebpfInfo`, `sys.ebpfRemoveMemlock`, `sys.ebpfFeatureProbe`, `sys.ebpfBTFKernelInfo`, `sys.ebpfMapCreate`, `sys.ebpfMapLoadPinned`, `sys.ebpfMapLookup`, `sys.ebpfMapUpdate`, `sys.ebpfMapEntries`, `sys.ebpfMapPin`, `sys.ebpfProgramLoad`, `sys.ebpfProgramLoadPinned`, `sys.ebpfProgramTest`, `sys.ebpfAttachSocketFilter`, `sys.ebpfAttachKprobe`, `sys.ebpfAttachKretprobe`, `sys.ebpfAttachTracepoint`, `sys.ebpfAttachRawTracepoint`, `sys.ebpfAttachXDP`, `sys.ebpfLinkInfo`, `sys.ebpfLinkClose`, `sys.ebpfRingbufReaderCreate`, `sys.ebpfRingbufRead`, `sys.ebpfPerfReaderCreate`, and `sys.ebpfPerfRead`. Program loading uses built-in self-contained kinds, not target-side C compilation or raw assembly input.
 - Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, env helpers, directory/stat helpers, and process helpers.
 - Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, and `io.pipe`.
+- Go net package: `net.dial`, `net.listen`, `net.listenPacket`, `net.pipe`, DNS helpers such as `net.lookupHost`, `net.lookupIP`, `net.lookupPort`, `net.lookupSRV`, address helpers such as `net.resolveTCPAddr`, `net.resolveUDPAddr`, `net.resolveUnixAddr`, `net.joinHostPort`, `net.splitHostPort`, stream helpers such as `net.connRead`, `net.connWrite`, `net.connClose`, listener helpers such as `net.listenerAccept`, `net.listenerClose`, and packet helpers such as `net.packetReadFrom` and `net.packetWriteTo`.
 
-The `os` and `io` globals use lower camel-case names and also expose Go-style aliases such as `os.ReadFile` and `io.Copy`. File-returning `os` helpers return managed FD handles. Release them with `os.fileClose({handle})` or `sys.close({handle})`; release roots with `os.rootClose({root})`.
+The `os`, `io`, and `net` globals use lower camel-case names and also expose Go-style aliases such as `os.ReadFile`, `io.Copy`, and `net.LookupHost`. File-returning `os` helpers return managed FD handles. Release them with `os.fileClose({handle})` or `sys.close({handle})`; release roots with `os.rootClose({root})`; release network resources with `net.connClose({conn})`, `net.listenerClose({listener})`, or `net.packetClose({packet})`.
 
-API-specific docs are available under `uapi://api`, including `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, `uapi://api/sys-unix-process-memory`, `uapi://api/sys-unix-coverage`, and `uapi://api/ebpf`.
+API-specific docs are available under `uapi://api`, including `uapi://api/sys-unix`, `uapi://api/sys-unix-vectored-io`, `uapi://api/sys-unix-process-memory`, `uapi://api/sys-unix-coverage`, `uapi://api/go-net`, and `uapi://api/ebpf`.
 
 ## Ptrace Workflow
 

@@ -1,6 +1,6 @@
 # Examples
 
-Read MCP resources such as `uapi://agent-guide`, `uapi://tools-guide`, and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`, `os.*`, and `io.*`; helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, and `import` are not available. Use `tool_register` when an example becomes a reusable workflow for later `tool_execute` calls.
+Read MCP resources such as `uapi://agent-guide`, `uapi://tools-guide`, and `uapi://scripting-api` with the MCP client before running these examples. Inside eval, use `sys.*`, `os.*`, `io.*`, and `net.*`; helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, and `import` are not available. Use `tool_register` when an example becomes a reusable workflow for later `tool_execute` calls.
 
 Standalone reusable scripts live in `examples/*.js`, are embedded into the binary at build time, and are exposed as MCP resources. Read `uapi://examples` for the index, `uapi://examples/index.json` for metadata, `uapi://examples/001-network-interfaces-ioctl.js` for network interface enumeration through `SIOCGIF*` ioctls, or `uapi://examples/006-strace-syscall-trace.js` for a ptrace-only syscall tracer.
 
@@ -82,4 +82,19 @@ try {
   os.fileClose({handle: "src"});
   os.fileClose({handle: "dst"});
 }
+```
+
+## Go net TCP Echo
+
+```javascript
+const listener = net.listen({network: "tcp", address: "127.0.0.1:0", handle: "tcpListener"});
+const address = net.listenerAddr({listener: "tcpListener"}).addr.address;
+const client = net.dial({network: "tcp", address, timeout_ms: 1000, handle: "tcpClient"});
+const server = net.listenerAccept({listener: "tcpListener", conn_handle: "tcpServer", timeout_ms: 1000});
+net.connWrite({conn: "tcpClient", data_utf8: "ping"});
+const got = net.connRead({conn: "tcpServer", length: 4, encoding: "utf8", timeout_ms: 1000});
+net.connClose({conn: "tcpClient"});
+net.connClose({conn: "tcpServer"});
+net.listenerClose({listener: "tcpListener"});
+return got;
 ```

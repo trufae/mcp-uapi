@@ -55,9 +55,10 @@ Available globals:
 - `sys`: synchronous Linux sys/unix scripting API.
 - `uapi`: alias for `sys` for older scripts.
 - `os`: synchronous Go package os style wrappers over managed handles, roots, processes, env, and filesystem helpers.
-- `io`: synchronous Go package io style copy/read/write helpers over managed handle, buffer, path, data, and discard endpoints.
+- `io`: synchronous Go package io style copy/read/write helpers over managed handle, net connection, buffer, path, data, and discard endpoints.
+- `net`: synchronous Go package net style wrappers over TCP/IP, UDP, Unix domain sockets, DNS resolution, interfaces, and managed network handles.
 
-Not available in eval: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, Node.js modules, direct network clients, direct MCP resource reads, and server-terminating helpers such as `os.Exit`.
+Not available in eval: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, Node.js modules, direct MCP resource reads, and server-terminating helpers such as `os.Exit`.
 
 ## Discovery Probe
 
@@ -73,6 +74,7 @@ return {
   wrappers: caps.scripting_api.uapi_wrappers,
   osWrappers: caps.scripting_api.os_wrappers,
   ioWrappers: caps.scripting_api.io_wrappers,
+  netWrappers: caps.scripting_api.net_wrappers,
   constants: Object.keys(sys.constants().constants),
   uname: sys.uname()
 };
@@ -101,6 +103,7 @@ Treat `ok:false` errno values as observations during probing rather than crashes
 Helpers that create FDs, buffers, and mappings return managed names. Reuse those names within later eval calls, and read `uapi://state` through MCP resources when you need a live inventory. Close what you create:
 
 - FDs: `sys.close({handle})` or `os.fileClose({handle})`.
+- Network connections/listeners/packet sockets: `net.connClose({conn})`, `net.listenerClose({listener})`, or `net.packetClose({packet})`.
 - Roots: `os.rootClose({root})`.
 - Mappings: `sys.munmap({mapping})`.
 - Buffers: `sys.bufferFree({name})`.
