@@ -21,7 +21,8 @@ The server does not implement fuzzing policy, scheduling, minimization, or corpu
 - `ioctl`: integer argument or pointer to a managed buffer range.
 - eBPF: self-contained `github.com/cilium/ebpf` helpers for maps, built-in program kinds, links, ringbuf/perf readers, feature probes, BTF inspection, and pinning. Scripts do not need clang, bpftool, a C compiler, raw assembly, or ELF loading on the target.
 - Go standard library wrappers: `os.*` and `io.*` globals for package `os` and package `io` style filesystem, root, process, env, copy, read, and write workflows over managed handles and explicit byte encodings.
-- `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, and `io.*` wrappers, captured logs, timeout enforcement, and JSON results.
+- `net.*`: package `net` style wrappers for TCP, UDP, Unix domain sockets, DNS resolution (host, IP, CNAME, MX, NS, TXT, SRV, port, reverse), interface enumeration, IP/CIDR parsing, and managed `net.Conn`/`net.Listener`/`net.PacketConn` handles with deadline support. `io.*` endpoints accept `{conn: "name"}` for stream copy and read/write over any managed connection.
+- `eval`: Goja JavaScript with synchronous `sys.*`/`uapi.*`, `os.*`, `io.*`, and `net.*` wrappers, captured logs, timeout enforcement, and JSON results.
 - Managed eval tools: `tool_register`, `tool_update`, `tool_execute`, `tool_list`, `tool_read`, `tool_export`, `tool_import`, and `tool_delete` for saving learned scripts as reusable toolboxes.
 
 Agents should read MCP resources `uapi://agent-guide`, `uapi://tools-guide`, `uapi://capabilities`, `uapi://scripting-api`, and `uapi://api-reference` immediately after connecting. These are MCP resources read by the client, not JavaScript URLs inside eval. Inside eval, use `sys.capabilities()` instead of nonexistent helpers such as `uapi.request`, `sys.request`, `fetch`, `require`, or `import`.
@@ -34,7 +35,7 @@ Managed eval tools are registered at runtime by agents. They live in memory by d
 
 This server intentionally exposes direct Linux syscalls. It can create files, open sockets, signal processes, attach to ptrace-allowed processes, mutate mappings, and issue arbitrary ioctls. Run it only in an isolated lab environment with a trusted MCP client.
 
-Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `os.open`, `os.create`, `os.openRoot`, `sys.socket`, `sys.socketpair`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs.
+Raw integer FD access is disabled by default. Prefer managed handles returned by script calls such as `sys.open`, `os.open`, `os.create`, `os.openRoot`, `sys.socket`, `sys.socketpair`, `net.dial`, `net.listen`, `net.listenPacket`, `sys.epollCreate`, `sys.bufferAlloc`, `sys.mmap`, `sys.memfdCreate`, and `sys.eventfd`. Start with `--allow-raw-fd` only when a workflow truly needs externally supplied FDs. Close `net.Conn`, `net.Listener`, and `net.PacketConn` handles explicitly with `net.connClose`, `net.listenerClose`, and `net.packetClose` when done.
 
 eBPF loading and attachment can observe or affect kernel execution depending on program type, return value, and hook. Kernel policy and capabilities still apply. Prefer explicit cleanup with `sys.ebpfLinkClose`, `sys.ebpfProgramClose`, `sys.ebpfMapClose`, and reader close helpers unless a pin is intentionally used to persist an object.
 
@@ -196,6 +197,33 @@ Trace a few syscalls from an allowed process:
 const src = os.readFile({name: 'examples/006-strace-syscall-trace.js', encoding: 'utf8'});
 const run = new Function('args', 'console', 'print', 'sys', 'uapi', 'os', 'io', src.data_utf8);
 return run({pid: args.pid, max_events: 8, wait_timeout_ms: 1000}, console, print, sys, uapi, os, io);
+```
+
+Open a TCP connection and exchange bytes using the `net.*` wrappers:
+
+```javascript
+const listener = net.listen({network: 'tcp', address: '127.0.0.1:0'});
+const addr = net.listenerAddr({listener: listener.listener}).addr.address;
+const client = net.dial({network: 'tcp', address: addr, timeout_ms: 1000});
+const server = net.listenerAccept({listener: listener.listener, timeout_ms: 1000});
+net.connWrite({conn: client.conn, data_utf8: 'ping'});
+const got = net.connRead({conn: server.conn, length: 4, encoding: 'utf8', timeout_ms: 1000});
+net.connClose({conn: client.conn});
+net.connClose({conn: server.conn});
+net.listenerClose({listener: listener.listener});
+return got;
+```
+
+Scan a host for open TCP ports (see `uapi://examples/010-net-tcp-port-scanner.js`):
+
+```javascript
+const ports = [22, 80, 443, 8080];
+return ports.map(port => {
+  const addr = net.joinHostPort({host: args.target, port}).address;
+  const d = net.dial({network: 'tcp', address: addr, timeout_ms: 500});
+  if (d.ok) net.connClose({conn: d.conn});
+  return {port, open: d.ok, error: d.error || ''};
+});
 ```
 
 Copy a file with the `os` and `io` scripting globals:
