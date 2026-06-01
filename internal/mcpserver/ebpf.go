@@ -2372,7 +2372,7 @@ func (e *scriptEnv) ebpfPerfEventInstructions(args ebpfProgramLoadArgs, returnVa
 		asm.StoreMem(asm.R10, -8, asm.R0, asm.DWord),
 		asm.Mov.Reg(asm.R1, asm.R6),
 		asm.LoadMapPtr(asm.R2, entry.Map.FD()),
-		asm.LoadImm(asm.R3, int64(uint32(unix.BPF_F_CURRENT_CPU)), asm.DWord),
+		asm.LoadImm(asm.R3, int64(uint32(bpfFCurrentCPU)), asm.DWord),
 		asm.Mov.Reg(asm.R4, asm.R10),
 		asm.Add.Imm(asm.R4, -16),
 		asm.Mov.Imm(asm.R5, 16),

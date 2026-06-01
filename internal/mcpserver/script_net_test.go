@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"encoding/json"
 	stdnet "net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
@@ -105,7 +106,7 @@ func TestEvalNetUDPAndUnixDomainSockets(t *testing.T) {
 	app, _ := New(Config{})
 	defer app.Close()
 
-	socketPath := filepath.Join(t.TempDir(), "echo.sock")
+	socketPath := shortUnixSocketPath(t, "echo.sock")
 	resp, result := callEvalForTest(t, app, map[string]any{"script": `
 let udpServer = null;
 let udpClient = null;
@@ -223,12 +224,24 @@ func TestEmbeddedNetExamplesExecuteThroughMCP(t *testing.T) {
 		t.Fatalf("scanner open ports = %#v", scannerResult["open"])
 	}
 
-	socketPath := filepath.Join(t.TempDir(), "example.sock")
+	socketPath := shortUnixSocketPath(t, "example.sock")
 	unixEcho := callExampleThroughMCP(t, client, "uapi://examples/011-net-unix-domain-socket-echo.js", map[string]any{"path": socketPath, "message": "mcp unix", "timeout_ms": 1000})
 	unixResult := unixEcho.Result.(map[string]any)
 	if unixResult["ok"] != true {
 		t.Fatalf("unix socket example failed: %#v", unixResult)
 	}
+}
+
+func shortUnixSocketPath(t *testing.T, name string) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "mcp-uapi-")
+	if err != nil {
+		t.Fatalf("create short temp dir: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.RemoveAll(dir)
+	})
+	return filepath.Join(dir, name)
 }
 
 func callExampleThroughMCP(t *testing.T, client *mcpclient.Client, uri string, args map[string]any) evalResponse {

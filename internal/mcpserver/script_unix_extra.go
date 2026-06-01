@@ -126,6 +126,16 @@ type scriptTimespecArg struct {
 	DurationMS Uint64 `json:"duration_ms"`
 }
 
+type scriptRemoteIovec struct {
+	Base uintptr
+	Len  int
+}
+
+type scriptItimerSpec struct {
+	Value    unix.Timespec
+	Interval unix.Timespec
+}
+
 type scriptTimerfdCreateArgs struct {
 	ClockID ConstUint64 `json:"clockid"`
 	Flags   ConstUint64 `json:"flags"`
@@ -247,7 +257,7 @@ func (e *scriptEnv) readv(value goja.Value, withOffset, withFlags bool) (any, er
 		fields["offset"] = offset
 		if withFlags {
 			fields["flags"] = int(args.Flags)
-			n, err = unix.Preadv2(fd, buffers, offset, int(args.Flags))
+			n, err = platformPreadv2(fd, buffers, offset, int(args.Flags))
 		} else {
 			n, err = unix.Preadv(fd, buffers, offset)
 		}
@@ -298,7 +308,7 @@ func (e *scriptEnv) writev(value goja.Value, withOffset, withFlags bool) (any, e
 		fields["offset"] = offset
 		if withFlags {
 			fields["flags"] = int(args.Flags)
-			n, err = unix.Pwritev2(fd, buffers, offset, int(args.Flags))
+			n, err = platformPwritev2(fd, buffers, offset, int(args.Flags))
 		} else {
 			n, err = unix.Pwritev(fd, buffers, offset)
 		}
@@ -331,7 +341,7 @@ func (e *scriptEnv) scriptProcessVMReadv(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := unix.ProcessVMReadv(args.PID, local, remote, uint(args.Flags))
+	n, err := platformProcessVMReadv(args.PID, local, remote, uint(args.Flags))
 	fields := map[string]any{"pid": args.PID, "local_iovecs": len(local), "remote_iovecs": len(remote), "bytes_requested": localTotal, "remote_bytes": remoteTotal, "flags": uint(args.Flags), "bytes_read": n}
 	if err == nil {
 		if encErr := addReadvData(fields, buffers, n, args.Encoding); encErr != nil {
@@ -363,7 +373,7 @@ func (e *scriptEnv) scriptProcessVMWritev(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := unix.ProcessVMWritev(args.PID, local, remote, uint(args.Flags))
+	n, err := platformProcessVMWritev(args.PID, local, remote, uint(args.Flags))
 	fields := map[string]any{"pid": args.PID, "local_iovecs": len(local), "remote_iovecs": len(remote), "bytes_requested": totalBufferLength(buffers), "remote_bytes": remoteTotal, "flags": uint(args.Flags), "bytes_written": n, "checksum64": checksum}
 	runtime.KeepAlive(buffers)
 	return scriptSyscallResult(fields, err)
@@ -394,7 +404,7 @@ func (e *scriptEnv) scriptSplice(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := unix.Splice(inFD, inOffset, outFD, outOffset, length, int(args.Flags))
+	n, err := platformSplice(inFD, inOffset, outFD, outOffset, length, int(args.Flags))
 	fields := map[string]any{"in_handle": inHandle, "in_fd": inFD, "out_handle": outHandle, "out_fd": outFD, "length": length, "flags": int(args.Flags), "bytes_moved": n}
 	if inOffset != nil {
 		fields["in_offset"] = *inOffset
@@ -422,7 +432,7 @@ func (e *scriptEnv) scriptTee(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := unix.Tee(inFD, outFD, length, int(args.Flags))
+	n, err := platformTee(inFD, outFD, length, int(args.Flags))
 	return scriptSyscallResult(map[string]any{"in_handle": inHandle, "in_fd": inFD, "out_handle": outHandle, "out_fd": outFD, "length": length, "flags": int(args.Flags), "bytes_moved": n}, err)
 }
 
@@ -439,7 +449,7 @@ func (e *scriptEnv) scriptVmsplice(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	n, err := unix.Vmsplice(fd, iovecs, int(args.Flags))
+	n, err := platformVmsplice(fd, iovecs, int(args.Flags))
 	runtime.KeepAlive(buffers)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "iovecs_requested": len(iovecs), "bytes_requested": totalBufferLength(buffers), "bytes_written": n, "flags": int(args.Flags), "checksum64": checksum}, err)
 }
@@ -452,7 +462,7 @@ func (e *scriptEnv) scriptCreat(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.Creat(args.Path, uint32(args.Mode))
+	fd, err := platformCreat(args.Path, uint32(args.Mode))
 	return e.registerScriptFD(fd, "file", args.Path, args.Handle, map[string]any{"mode": uint32(args.Mode)}, map[string]any{"path": args.Path, "mode": uint32(args.Mode)}, err)
 }
 
@@ -462,7 +472,7 @@ func (e *scriptEnv) scriptFaccessat2(value goja.Value) (any, error) {
 		return nil, err
 	}
 	dirfd := defaultedConstInt(args.DirFD, unix.AT_FDCWD)
-	err := unix.Faccessat2(dirfd, args.Path, uint32(args.Mode), int(args.Flags))
+	err := platformFaccessat2(dirfd, args.Path, uint32(args.Mode), int(args.Flags))
 	return scriptSyscallResult(map[string]any{"dirfd": dirfd, "path": args.Path, "mode": uint32(args.Mode), "flags": int(args.Flags)}, err)
 }
 
@@ -472,9 +482,11 @@ func (e *scriptEnv) scriptOpenat2(value goja.Value) (any, error) {
 		return nil, err
 	}
 	dirfd := defaultedConstInt(args.DirFD, unix.AT_FDCWD)
-	how := &unix.OpenHow{Flags: uint64(args.Flags), Mode: uint64(args.Mode), Resolve: uint64(args.Resolve)}
-	fd, err := unix.Openat2(dirfd, args.Path, how)
-	return e.registerScriptFD(fd, "file", args.Path, args.Handle, map[string]any{"dirfd": dirfd, "flags": how.Flags, "resolve": how.Resolve}, map[string]any{"dirfd": dirfd, "path": args.Path, "flags": how.Flags, "mode": how.Mode, "resolve": how.Resolve}, err)
+	flags := uint64(args.Flags)
+	mode := uint64(args.Mode)
+	resolve := uint64(args.Resolve)
+	fd, err := platformOpenat2(dirfd, args.Path, flags, mode, resolve)
+	return e.registerScriptFD(fd, "file", args.Path, args.Handle, map[string]any{"dirfd": dirfd, "flags": flags, "resolve": resolve}, map[string]any{"dirfd": dirfd, "path": args.Path, "flags": flags, "mode": mode, "resolve": resolve}, err)
 }
 
 func (e *scriptEnv) scriptFadvise(value goja.Value) (any, error) {
@@ -494,7 +506,7 @@ func (e *scriptEnv) scriptFadvise(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.Fadvise(fd, offset, length, int(args.Advice))
+	err = platformFadvise(fd, offset, length, int(args.Advice))
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "offset": offset, "length": length, "advice": int(args.Advice)}, err)
 }
 
@@ -515,7 +527,7 @@ func (e *scriptEnv) scriptFallocate(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.Fallocate(fd, uint32(args.Mode), offset, length)
+	err = platformFallocate(fd, uint32(args.Mode), offset, length)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "offset": offset, "length": length, "mode": uint32(args.Mode)}, err)
 }
 
@@ -536,7 +548,7 @@ func (e *scriptEnv) scriptSyncFileRange(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.SyncFileRange(fd, offset, length, int(args.Flags))
+	err = platformSyncFileRange(fd, offset, length, int(args.Flags))
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "offset": offset, "length": length, "flags": int(args.Flags)}, err)
 }
 
@@ -554,7 +566,7 @@ func (e *scriptEnv) scriptFlock(value goja.Value) (any, error) {
 }
 
 func (e *scriptEnv) scriptGetdents(value goja.Value) (any, error) {
-	return e.direntRead(value, unix.Getdents, "getdents")
+	return e.direntRead(value, platformGetdents, "getdents")
 }
 
 func (e *scriptEnv) scriptReadDirent(value goja.Value) (any, error) {
@@ -607,7 +619,7 @@ func (e *scriptEnv) scriptGetrandom(value goja.Value) (any, error) {
 		return nil, fmt.Errorf("length %d exceeds max_read_bytes %d", args.Length, e.app.config.MaxReadBytes)
 	}
 	buf := make([]byte, int(args.Length))
-	n, err := unix.Getrandom(buf, int(args.Flags))
+	n, err := platformGetrandom(buf, int(args.Flags))
 	fields := map[string]any{"length": uint64(args.Length), "flags": int(args.Flags), "bytes_read": n}
 	if err == nil {
 		encoded, encErr := encodeBytes(buf[:n], args.Encoding)
@@ -626,7 +638,7 @@ func (e *scriptEnv) scriptPidfdOpen(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.PidfdOpen(args.PID, int(args.Flags))
+	fd, err := platformPidfdOpen(args.PID, int(args.Flags))
 	return e.registerScriptFD(fd, "pidfd", "", args.Handle, map[string]any{"pid": args.PID, "flags": int(args.Flags)}, map[string]any{"pid": args.PID, "flags": int(args.Flags)}, err)
 }
 
@@ -639,7 +651,7 @@ func (e *scriptEnv) scriptPidfdGetfd(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	newFD, err := unix.PidfdGetfd(pidfd, args.TargetFD, int(args.Flags))
+	newFD, err := platformPidfdGetfd(pidfd, args.TargetFD, int(args.Flags))
 	return e.registerScriptFD(newFD, "pidfd_target", "", args.NewHandle, map[string]any{"pidfd": pidHandle, "target_fd": args.TargetFD}, map[string]any{"pidfd_handle": pidHandle, "pidfd": pidfd, "target_fd": args.TargetFD, "flags": int(args.Flags)}, err)
 }
 
@@ -652,7 +664,7 @@ func (e *scriptEnv) scriptPidfdSendSignal(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.PidfdSendSignal(fd, unix.Signal(args.Signal), nil, int(args.Flags))
+	err = platformPidfdSendSignal(fd, unix.Signal(args.Signal), int(args.Flags))
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "signal": int(args.Signal), "flags": uint(args.Flags)}, err)
 }
 
@@ -663,7 +675,7 @@ func (e *scriptEnv) scriptClockGettime(value goja.Value) (any, error) {
 	}
 	clockid := int32(args.ClockID)
 	var ts unix.Timespec
-	err := unix.ClockGettime(clockid, &ts)
+	err := platformClockGettime(clockid, &ts)
 	return scriptSyscallResult(map[string]any{"clockid": clockid, "time": timespecInfo(ts)}, err)
 }
 
@@ -674,7 +686,7 @@ func (e *scriptEnv) scriptClockGetres(value goja.Value) (any, error) {
 	}
 	clockid := int32(args.ClockID)
 	var ts unix.Timespec
-	err := unix.ClockGetres(clockid, &ts)
+	err := platformClockGetres(clockid, &ts)
 	return scriptSyscallResult(map[string]any{"clockid": clockid, "resolution": timespecInfo(ts)}, err)
 }
 
@@ -691,7 +703,7 @@ func (e *scriptEnv) scriptNanosleep(value goja.Value) (any, error) {
 	}
 	req := timespecFromArg(args)
 	var rem unix.Timespec
-	err := unix.Nanosleep(&req, &rem)
+	err := platformNanosleep(&req, &rem)
 	return scriptSyscallResult(map[string]any{"request": timespecInfo(req), "remain": timespecInfo(rem)}, err)
 }
 
@@ -706,9 +718,9 @@ func (e *scriptEnv) scriptTimerfdCreate(value goja.Value) (any, error) {
 	}
 	flags := int(args.Flags)
 	if flags == 0 {
-		flags = unix.TFD_CLOEXEC
+		flags = platformTimerfdCloexec()
 	}
-	fd, err := unix.TimerfdCreate(clockid, flags)
+	fd, err := platformTimerfdCreate(clockid, flags)
 	return e.registerScriptFD(fd, "timerfd", "", args.Handle, map[string]any{"clockid": clockid, "flags": flags}, map[string]any{"clockid": clockid, "flags": flags}, err)
 }
 
@@ -721,8 +733,7 @@ func (e *scriptEnv) scriptTimerfdGettime(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	var spec unix.ItimerSpec
-	err = unix.TimerfdGettime(fd, &spec)
+	spec, err := platformTimerfdGettime(fd)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "timer": itimerSpecInfo(spec)}, err)
 }
 
@@ -743,9 +754,8 @@ func (e *scriptEnv) scriptTimerfdSettime(value goja.Value) (any, error) {
 	if intervalSpec.Sec == 0 && intervalSpec.Nsec == 0 && intervalSpec.DurationMS == 0 {
 		intervalSpec = scriptTimespecArg{Sec: args.IntervalSec, Nsec: args.IntervalNsec, DurationMS: args.IntervalMS}
 	}
-	newSpec := unix.ItimerSpec{Value: timespecFromArg(valueSpec), Interval: timespecFromArg(intervalSpec)}
-	var oldSpec unix.ItimerSpec
-	err = unix.TimerfdSettime(fd, int(args.Flags), &newSpec, &oldSpec)
+	newSpec := scriptItimerSpec{Value: timespecFromArg(valueSpec), Interval: timespecFromArg(intervalSpec)}
+	oldSpec, err := platformTimerfdSettime(fd, int(args.Flags), newSpec)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "flags": int(args.Flags), "timer": itimerSpecInfo(newSpec), "old_timer": itimerSpecInfo(oldSpec)}, err)
 }
 
@@ -812,7 +822,7 @@ func (e *scriptEnv) scriptTgkill(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	err := unix.Tgkill(args.TGID, args.TID, unix.Signal(args.Signal))
+	err := platformTgkill(args.TGID, args.TID, unix.Signal(args.Signal))
 	return scriptSyscallResult(map[string]any{"tgid": args.TGID, "tid": args.TID, "signal": int(args.Signal)}, err)
 }
 
@@ -829,7 +839,7 @@ func (e *scriptEnv) scriptPrlimit(value goja.Value) (any, error) {
 		}
 		newLimit = &unix.Rlimit{Cur: uint64(*args.Cur), Max: uint64(*args.Max)}
 	}
-	err := unix.Prlimit(args.PID, int(args.Resource), newLimit, &old)
+	err := platformPrlimit(args.PID, int(args.Resource), newLimit, &old)
 	fields := map[string]any{"pid": args.PID, "resource": int(args.Resource), "old_rlimit": rlimitInfo(old)}
 	if newLimit != nil {
 		fields["new_rlimit"] = rlimitInfo(*newLimit)
@@ -842,7 +852,7 @@ func (e *scriptEnv) scriptPrctlRetInt(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	r, err := unix.PrctlRetInt(int(args.Option), uintptr(args.Arg2), uintptr(args.Arg3), uintptr(args.Arg4), uintptr(args.Arg5))
+	r, err := platformPrctlRetInt(int(args.Option), uintptr(args.Arg2), uintptr(args.Arg3), uintptr(args.Arg4), uintptr(args.Arg5))
 	return scriptSyscallResult(map[string]any{"option": int(args.Option), "arg2": hex64(uint64(args.Arg2)), "arg3": hex64(uint64(args.Arg3)), "arg4": hex64(uint64(args.Arg4)), "arg5": hex64(uint64(args.Arg5)), "return": r}, err)
 }
 
@@ -952,7 +962,7 @@ func (e *scriptEnv) scriptBindToDevice(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.BindToDevice(fd, args.Device)
+	err = platformBindToDevice(fd, args.Device)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "device": args.Device}, err)
 }
 
@@ -1048,11 +1058,10 @@ func (e *scriptEnv) scriptGetpagesize(value goja.Value) (any, error) {
 }
 
 func (e *scriptEnv) scriptSysinfo(value goja.Value) (any, error) {
-	var info unix.Sysinfo_t
-	err := unix.Sysinfo(&info)
 	fields := map[string]any{}
+	info, err := platformSysinfo()
 	if err == nil {
-		fields["sysinfo"] = map[string]any{"uptime": info.Uptime, "loads": []uint64{uint64(info.Loads[0]), uint64(info.Loads[1]), uint64(info.Loads[2])}, "totalram": info.Totalram, "freeram": info.Freeram, "sharedram": info.Sharedram, "bufferram": info.Bufferram, "totalswap": info.Totalswap, "freeswap": info.Freeswap, "procs": info.Procs, "totalhigh": info.Totalhigh, "freehigh": info.Freehigh, "unit": info.Unit}
+		fields["sysinfo"] = info
 	}
 	return scriptSyscallResult(fields, err)
 }
@@ -1247,14 +1256,14 @@ func addReadvData(fields map[string]any, buffers [][]byte, n int, encoding strin
 	return nil
 }
 
-func processRemoteIovecs(specs []scriptRemoteIovecArg, address Uint64, length Uint64) ([]unix.RemoteIovec, int, error) {
+func processRemoteIovecs(specs []scriptRemoteIovecArg, address Uint64, length Uint64) ([]scriptRemoteIovec, int, error) {
 	if len(specs) == 0 {
 		if address == 0 || length == 0 {
 			return nil, 0, fmt.Errorf("remote_iovs or address and length are required")
 		}
 		specs = []scriptRemoteIovecArg{{Address: address, Length: length}}
 	}
-	remote := make([]unix.RemoteIovec, len(specs))
+	remote := make([]scriptRemoteIovec, len(specs))
 	total := 0
 	for i, spec := range specs {
 		length, err := checkedInt(fmt.Sprintf("remote_iovs[%d].length", i), spec.Length)
@@ -1264,7 +1273,7 @@ func processRemoteIovecs(specs []scriptRemoteIovecArg, address Uint64, length Ui
 		if length <= 0 {
 			return nil, 0, fmt.Errorf("remote_iovs[%d].length must be greater than zero", i)
 		}
-		remote[i] = unix.RemoteIovec{Base: uintptr(spec.Address), Len: length}
+		remote[i] = scriptRemoteIovec{Base: uintptr(spec.Address), Len: length}
 		total += length
 	}
 	return remote, total, nil
@@ -1324,7 +1333,7 @@ func timevalInfo(tv unix.Timeval) map[string]any {
 	return map[string]any{"sec": tv.Sec, "usec": tv.Usec, "nsec_total": unix.TimevalToNsec(tv)}
 }
 
-func itimerSpecInfo(spec unix.ItimerSpec) map[string]any {
+func itimerSpecInfo(spec scriptItimerSpec) map[string]any {
 	return map[string]any{"value": timespecInfo(spec.Value), "interval": timespecInfo(spec.Interval)}
 }
 

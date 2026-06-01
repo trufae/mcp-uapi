@@ -238,7 +238,9 @@ func groupConstants(names ...string) map[string]any {
 	constants := namedConstants()
 	group := map[string]any{}
 	for _, name := range names {
-		group[name] = constants[name]
+		if value, ok := constants[name]; ok {
+			group[name] = value
+		}
 	}
 	return group
 }

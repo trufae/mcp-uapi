@@ -3,12 +3,17 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SCRIPT="${ROOT_DIR}/scripts/build-target.sh"
+GO_BIN="${GO_BIN:-${ROOT_DIR}/.tools/go/bin/go}"
+if [[ ! -x "${GO_BIN}" ]]; then
+  GO_BIN="$(command -v go)"
+fi
+HOST_GOOS="$("${GO_BIN}" env GOHOSTOS)"
 
 TARGETS=(
   # aix/ppc64 — unsupported
 
-  # darwin/amd64 — unsupported
-  # darwin/arm64 — unsupported
+  darwin/amd64
+  darwin/arm64
 
   # dragonfly/amd64 — unsupported
 
@@ -49,6 +54,15 @@ TARGETS=(
 
   # solaris/amd64 — unsupported
 )
+
+if [[ "${HOST_GOOS}" == "darwin" ]]; then
+  TARGETS+=(
+    ios/amd64
+    ios/arm64
+  )
+else
+  echo "Skipping iOS targets; Go requires external linking through the Apple SDK."
+fi
 
 FAILED=()
 for target in "${TARGETS[@]}"; do

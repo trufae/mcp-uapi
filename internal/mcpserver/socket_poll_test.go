@@ -1,6 +1,9 @@
 package mcpserver
 
-import "testing"
+import (
+	"runtime"
+	"testing"
+)
 
 func TestSocketPollAndEpollPrimitives(t *testing.T) {
 	app, _ := New(Config{})
@@ -25,6 +28,14 @@ func TestSocketPollAndEpollPrimitives(t *testing.T) {
 	requireOK(t, setsockopt)
 	getsockopt := callToolForTest(t, app, "uapi_getsockopt_int", map[string]any{"handle": "left", "level": "SOL_SOCKET", "opt": "SO_REUSEADDR"})
 	requireOK(t, getsockopt)
+
+	if runtime.GOOS != "linux" {
+		for _, handle := range []string{"left", "right"} {
+			closed := callToolForTest(t, app, "uapi_close", map[string]any{"handle": handle})
+			requireOK(t, closed)
+		}
+		return
+	}
 
 	epoll := callToolForTest(t, app, "uapi_epoll_create", map[string]any{"handle": "ep"})
 	requireOK(t, epoll)

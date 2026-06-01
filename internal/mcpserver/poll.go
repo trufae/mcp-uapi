@@ -64,9 +64,9 @@ func (a *App) handleEpollCreate(ctx context.Context, request mcp.CallToolRequest
 	}
 	flags := int(args.Flags)
 	if flags == 0 {
-		flags = unix.EPOLL_CLOEXEC
+		flags = platformEpollCloexec()
 	}
-	fd, err := unix.EpollCreate1(flags)
+	fd, err := platformEpollCreate1(flags)
 	if err != nil {
 		return syscallResult(map[string]any{"flags": flags}, err)
 	}
@@ -111,8 +111,8 @@ func (a *App) handleEpollCtl(ctx context.Context, request mcp.CallToolRequest) (
 	if args.Data != nil {
 		eventData = int(*args.Data)
 	}
-	event := &unix.EpollEvent{Events: uint32(args.Events), Fd: int32(eventData)}
-	err = unix.EpollCtl(epfd, int(args.Op), targetFD, event)
+	event := &platformEpollEvent{Events: uint32(args.Events), FD: int32(eventData)}
+	err = platformEpollCtl(epfd, int(args.Op), targetFD, event)
 	return syscallResult(map[string]any{"epoll_handle": epHandle, "epoll_fd": epfd, "target_handle": targetHandle, "target_fd": targetFD, "op": int(args.Op), "events": uint32(args.Events), "data": eventData}, err)
 }
 
@@ -138,13 +138,13 @@ func (a *App) handleEpollWait(ctx context.Context, request mcp.CallToolRequest) 
 	if err != nil {
 		return toolError(err)
 	}
-	events := make([]unix.EpollEvent, maxEvents)
-	n, waitErr := unix.EpollWait(epfd, events, int(args.TimeoutMS))
+	events := make([]platformEpollEvent, maxEvents)
+	n, waitErr := platformEpollWait(epfd, events, int(args.TimeoutMS))
 	fields := map[string]any{"epoll_handle": handle, "epoll_fd": epfd, "ready": n, "timeout_ms": uint32(args.TimeoutMS)}
 	if waitErr == nil {
 		out := make([]map[string]any, 0, n)
 		for i := 0; i < n; i++ {
-			out = append(out, map[string]any{"events": events[i].Events, "data": events[i].Fd})
+			out = append(out, map[string]any{"events": events[i].Events, "data": events[i].FD})
 		}
 		fields["events"] = out
 	}

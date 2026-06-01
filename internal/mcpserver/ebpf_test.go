@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -22,9 +23,11 @@ func TestEBPFCapabilitiesAndEmbeddedDocs(t *testing.T) {
 	if !ok {
 		t.Fatalf("eBPF constants missing or wrong type: %#v", doc.Constants["ebpf"])
 	}
-	for _, name := range []string{"BPF_F_CURRENT_CPU", "XDP_PASS", "XDP_GENERIC_MODE"} {
-		if _, ok := ebpfConstants[name]; !ok {
-			t.Fatalf("eBPF constants missing %s: %#v", name, ebpfConstants)
+	if runtime.GOOS == "linux" {
+		for _, name := range []string{"BPF_F_CURRENT_CPU", "XDP_PASS", "XDP_GENERIC_MODE"} {
+			if _, ok := ebpfConstants[name]; !ok {
+				t.Fatalf("eBPF constants missing %s: %#v", name, ebpfConstants)
+			}
 		}
 	}
 	if !strings.Contains(apiDocsIndexMarkdown(), "uapi://api/ebpf") {
@@ -82,7 +85,7 @@ return {
 		}
 	}
 	constants := nestedMap(t, value, "constants")
-	if constants["xdpPass"] != float64(2) || constants["currentCPU"] == nil {
+	if runtime.GOOS == "linux" && (constants["xdpPass"] != float64(2) || constants["currentCPU"] == nil) {
 		t.Fatalf("unexpected eBPF constants: %#v", constants)
 	}
 }
@@ -129,6 +132,10 @@ return {created, updated, looked, closed, state: sys.state()};
 }
 
 func TestEBPFProgramKindWorkflowWhenPermitted(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("eBPF program loading is Linux-specific")
+	}
+
 	app, _ := New(Config{})
 	defer app.Close()
 

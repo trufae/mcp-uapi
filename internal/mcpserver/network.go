@@ -43,7 +43,7 @@ func parseSockaddr(spec sockaddrSpec) (unix.Sockaddr, error) {
 		copy(addr.Addr[:], ip)
 		return addr, nil
 	case "netlink":
-		return &unix.SockaddrNetlink{Pid: uint32(spec.PID), Groups: uint32(spec.Groups)}, nil
+		return platformSockaddrNetlink(spec)
 	default:
 		return nil, fmt.Errorf("unsupported sockaddr family %q", spec.Family)
 	}
@@ -57,11 +57,12 @@ func sockaddrInfo(sa unix.Sockaddr) map[string]any {
 		return map[string]any{"family": "inet4", "ip": net.IP(addr.Addr[:]).String(), "port": addr.Port}
 	case *unix.SockaddrInet6:
 		return map[string]any{"family": "inet6", "ip": net.IP(addr.Addr[:]).String(), "port": addr.Port, "zone_id": addr.ZoneId}
-	case *unix.SockaddrNetlink:
-		return map[string]any{"family": "netlink", "pid": addr.Pid, "groups": addr.Groups}
 	case nil:
 		return nil
 	default:
+		if info := platformSockaddrInfo(sa); info != nil {
+			return info
+		}
 		return map[string]any{"family": fmt.Sprintf("%T", sa)}
 	}
 }
@@ -110,7 +111,7 @@ func (a *App) handleSocketpair(ctx context.Context, request mcp.CallToolRequest)
 	}
 	typ := int(args.Type)
 	if typ == 0 {
-		typ = unix.SOCK_STREAM | unix.SOCK_CLOEXEC
+		typ = unix.SOCK_STREAM | platformSocketCloexec()
 	}
 	if len(args.Handles) != 0 && len(args.Handles) != 2 {
 		return toolError(fmt.Errorf("handles must contain exactly two names when provided"))
@@ -219,7 +220,7 @@ func (a *App) handleAccept(ctx context.Context, request mcp.CallToolRequest) (*m
 	}
 	flags := int(args.Flags)
 	if flags == 0 {
-		flags = unix.SOCK_CLOEXEC
+		flags = platformSocketCloexec()
 	}
 	a.mu.Lock()
 	fd, parentHandle, _, err := a.resolveFDLocked(args.ListenerHandle, args.ListenerFD)
@@ -227,7 +228,7 @@ func (a *App) handleAccept(ctx context.Context, request mcp.CallToolRequest) (*m
 	if err != nil {
 		return toolError(err)
 	}
-	nfd, sa, acceptErr := unix.Accept4(fd, flags)
+	nfd, sa, acceptErr := platformAccept(fd, flags)
 	fields := map[string]any{"listener_handle": parentHandle, "listener_fd": fd, "flags": flags}
 	if acceptErr == nil {
 		a.mu.Lock()

@@ -273,7 +273,7 @@ func (e *scriptEnv) registerDupedFD(fd int, kind, requestedHandle string, meta m
 }
 
 func (e *scriptEnv) removeClosedFDs(first, last uint, flags uint) {
-	if flags&unix.CLOSE_RANGE_CLOEXEC != 0 {
+	if flags&platformCloseRangeCloexec() != 0 {
 		return
 	}
 	e.app.mu.Lock()
@@ -614,7 +614,7 @@ func (e *scriptEnv) scriptMkfifoat(value goja.Value) (any, error) {
 		return nil, err
 	}
 	dirfd := defaultedConstInt(args.DirFD, unix.AT_FDCWD)
-	err := unix.Mkfifoat(dirfd, args.Path, uint32(args.Mode))
+	err := platformMkfifoat(dirfd, args.Path, uint32(args.Mode))
 	return scriptSyscallResult(map[string]any{"dirfd": dirfd, "path": args.Path, "mode": uint32(args.Mode)}, err)
 }
 
@@ -642,7 +642,7 @@ func (e *scriptEnv) scriptMknodat(value goja.Value) (any, error) {
 		return nil, err
 	}
 	dirfd := defaultedConstInt(args.DirFD, unix.AT_FDCWD)
-	err := unix.Mknodat(dirfd, args.Path, uint32(args.Mode), args.Dev)
+	err := platformMknodat(dirfd, args.Path, uint32(args.Mode), args.Dev)
 	return scriptSyscallResult(map[string]any{"dirfd": dirfd, "path": args.Path, "mode": uint32(args.Mode), "dev": args.Dev}, err)
 }
 
@@ -744,7 +744,7 @@ func (e *scriptEnv) scriptRenameat2(value goja.Value) (any, error) {
 	}
 	olddirfd := defaultedConstInt(args.OldDirFD, unix.AT_FDCWD)
 	newdirfd := defaultedConstInt(args.NewDirFD, unix.AT_FDCWD)
-	err := unix.Renameat2(olddirfd, args.OldPath, newdirfd, args.NewPath, uint(args.Flags))
+	err := platformRenameat2(olddirfd, args.OldPath, newdirfd, args.NewPath, uint(args.Flags))
 	return scriptSyscallResult(map[string]any{"olddirfd": olddirfd, "oldpath": args.OldPath, "newdirfd": newdirfd, "newpath": args.NewPath, "flags": uint(args.Flags)}, err)
 }
 
@@ -792,7 +792,7 @@ func (e *scriptEnv) scriptStatfs(value goja.Value) (any, error) {
 	err := unix.Statfs(args.Path, &st)
 	fields := map[string]any{"path": args.Path}
 	if err == nil {
-		fields["statfs"] = statfsInfo(st)
+		fields["statfs"] = platformStatfsInfo(st)
 	}
 	return scriptSyscallResult(fields, err)
 }
@@ -810,7 +810,7 @@ func (e *scriptEnv) scriptFstatfs(value goja.Value) (any, error) {
 	err = unix.Fstatfs(fd, &st)
 	fields := map[string]any{"handle": handle, "fd": fd}
 	if err == nil {
-		fields["statfs"] = statfsInfo(st)
+		fields["statfs"] = platformStatfsInfo(st)
 	}
 	return scriptSyscallResult(fields, err)
 }
@@ -823,13 +823,12 @@ func (e *scriptEnv) scriptStatx(value goja.Value) (any, error) {
 	dirfd := defaultedConstInt(args.DirFD, unix.AT_FDCWD)
 	mask := int(args.Mask)
 	if mask == 0 {
-		mask = unix.STATX_BASIC_STATS
+		mask = platformStatxBasicStats()
 	}
-	var st unix.Statx_t
-	err := unix.Statx(dirfd, args.Path, int(args.Flags), mask, &st)
+	statx, err := platformStatxInfo(dirfd, args.Path, int(args.Flags), mask)
 	fields := map[string]any{"dirfd": dirfd, "path": args.Path, "flags": int(args.Flags), "mask": mask}
 	if err == nil {
-		fields["statx"] = statxInfo(st)
+		fields["statx"] = statx
 	}
 	return scriptSyscallResult(fields, err)
 }
@@ -908,7 +907,7 @@ func (e *scriptEnv) scriptFdatasync(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.Fdatasync(fd)
+	err = platformFdatasync(fd)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd}, err)
 }
 
@@ -926,7 +925,7 @@ func (e *scriptEnv) scriptSyncfs(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	err = unix.Syncfs(fd)
+	err = platformSyncfs(fd)
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd}, err)
 }
 
@@ -965,7 +964,7 @@ func (e *scriptEnv) scriptDup3(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	dupErr := unix.Dup3(fd, args.NewFD, int(args.Flags))
+	dupErr := platformDup3(fd, args.NewFD, int(args.Flags))
 	return e.registerDupedFD(args.NewFD, "dup", args.NewHandle, map[string]any{"source": handle, "flags": int(args.Flags)}, map[string]any{"source_handle": handle, "source_fd": fd, "newfd": args.NewFD, "flags": int(args.Flags)}, dupErr)
 }
 
@@ -992,7 +991,7 @@ func (e *scriptEnv) createPipe(args scriptPipeArgs, pipe2 bool) (any, error) {
 	fds := []int{0, 0}
 	var err error
 	if pipe2 {
-		err = unix.Pipe2(fds, int(args.Flags))
+		err = platformPipe2(fds, int(args.Flags))
 	} else {
 		err = unix.Pipe(fds)
 	}
@@ -1031,7 +1030,7 @@ func (e *scriptEnv) scriptCloseRange(value goja.Value) (any, error) {
 		return nil, fmt.Errorf("first/last exceed uint")
 	}
 	first, last, flags := uint(args.First), uint(args.Last), uint(args.Flags)
-	err := unix.CloseRange(first, last, flags)
+	err := platformCloseRange(first, last, flags)
 	if err == nil {
 		e.removeClosedFDs(first, last, flags)
 	}
@@ -1094,7 +1093,7 @@ func (e *scriptEnv) scriptFchdir(value goja.Value) (any, error) {
 }
 
 func (e *scriptEnv) scriptGetids(value goja.Value) (any, error) {
-	return map[string]any{"ok": true, "pid": unix.Getpid(), "ppid": unix.Getppid(), "tid": unix.Gettid(), "uid": unix.Getuid(), "euid": unix.Geteuid(), "gid": unix.Getgid(), "egid": unix.Getegid()}, nil
+	return map[string]any{"ok": true, "pid": unix.Getpid(), "ppid": unix.Getppid(), "tid": platformGettid(), "uid": unix.Getuid(), "euid": unix.Geteuid(), "gid": unix.Getgid(), "egid": unix.Getegid()}, nil
 }
 
 func (e *scriptEnv) scriptGetgroups(value goja.Value) (any, error) {
@@ -1103,12 +1102,12 @@ func (e *scriptEnv) scriptGetgroups(value goja.Value) (any, error) {
 }
 
 func (e *scriptEnv) scriptGetresuid(value goja.Value) (any, error) {
-	ruid, euid, suid := unix.Getresuid()
+	ruid, euid, suid := platformGetresuid()
 	return map[string]any{"ok": true, "ruid": ruid, "euid": euid, "suid": suid}, nil
 }
 
 func (e *scriptEnv) scriptGetresgid(value goja.Value) (any, error) {
-	rgid, egid, sgid := unix.Getresgid()
+	rgid, egid, sgid := platformGetresgid()
 	return map[string]any{"ok": true, "rgid": rgid, "egid": egid, "sgid": sgid}, nil
 }
 
@@ -1158,7 +1157,7 @@ func (e *scriptEnv) scriptEventfd(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.Eventfd(uint(args.Init), int(args.Flags))
+	fd, err := platformEventfd(uint(args.Init), int(args.Flags))
 	return e.registerScriptFD(fd, "eventfd", "", args.Handle, map[string]any{"init": uint(args.Init), "flags": int(args.Flags)}, map[string]any{"init": uint(args.Init), "flags": int(args.Flags)}, err)
 }
 
@@ -1167,7 +1166,7 @@ func (e *scriptEnv) scriptMemfdCreate(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.MemfdCreate(args.Name, int(args.Flags))
+	fd, err := platformMemfdCreate(args.Name, int(args.Flags))
 	return e.registerScriptFD(fd, "memfd", args.Name, args.Handle, map[string]any{"flags": int(args.Flags)}, map[string]any{"name": args.Name, "flags": int(args.Flags)}, err)
 }
 
@@ -1176,7 +1175,7 @@ func (e *scriptEnv) scriptInotifyInit(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.InotifyInit()
+	fd, err := platformInotifyInit()
 	return e.registerScriptFD(fd, "inotify", "", args.Handle, nil, map[string]any{}, err)
 }
 
@@ -1185,7 +1184,7 @@ func (e *scriptEnv) scriptInotifyInit1(value goja.Value) (any, error) {
 	if err := decodeScriptArgs(value, &args); err != nil {
 		return nil, err
 	}
-	fd, err := unix.InotifyInit1(int(args.Flags))
+	fd, err := platformInotifyInit1(int(args.Flags))
 	return e.registerScriptFD(fd, "inotify", "", args.Handle, map[string]any{"flags": int(args.Flags)}, map[string]any{"flags": int(args.Flags)}, err)
 }
 
@@ -1198,7 +1197,7 @@ func (e *scriptEnv) scriptInotifyAddWatch(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	wd, err := unix.InotifyAddWatch(fd, args.Path, uint32(args.Mask))
+	wd, err := platformInotifyAddWatch(fd, args.Path, uint32(args.Mask))
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "path": args.Path, "mask": uint32(args.Mask), "wd": wd}, err)
 }
 
@@ -1211,7 +1210,7 @@ func (e *scriptEnv) scriptInotifyRmWatch(value goja.Value) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	success, err := unix.InotifyRmWatch(fd, uint32(args.WD))
+	success, err := platformInotifyRmWatch(fd, uint32(args.WD))
 	return scriptSyscallResult(map[string]any{"handle": handle, "fd": fd, "wd": uint32(args.WD), "return": success}, err)
 }
 
@@ -1272,7 +1271,7 @@ func (e *scriptEnv) scriptCopyFileRange(value goja.Value) (any, error) {
 		}
 		writeOffset = &parsed
 	}
-	n, err := unix.CopyFileRange(readFD, readOffset, writeFD, writeOffset, int(args.Length), int(args.Flags))
+	n, err := platformCopyFileRange(readFD, readOffset, writeFD, writeOffset, int(args.Length), int(args.Flags))
 	fields := map[string]any{"read_handle": readHandle, "read_fd": readFD, "write_handle": writeHandle, "write_fd": writeFD, "length": uint64(args.Length), "flags": int(args.Flags), "bytes_copied": n}
 	if readOffset != nil {
 		fields["read_offset"] = *readOffset
@@ -1475,59 +1474,6 @@ func splitXattrList(data []byte) []string {
 		return []string{}
 	}
 	return parts
-}
-
-func statfsInfo(st unix.Statfs_t) map[string]any {
-	return map[string]any{
-		"type":    st.Type,
-		"bsize":   st.Bsize,
-		"blocks":  st.Blocks,
-		"bfree":   st.Bfree,
-		"bavail":  st.Bavail,
-		"files":   st.Files,
-		"ffree":   st.Ffree,
-		"fsid":    []int32{st.Fsid.Val[0], st.Fsid.Val[1]},
-		"namelen": st.Namelen,
-		"frsize":  st.Frsize,
-		"flags":   st.Flags,
-	}
-}
-
-func statxInfo(st unix.Statx_t) map[string]any {
-	return map[string]any{
-		"mask":                st.Mask,
-		"blksize":             st.Blksize,
-		"attributes":          hex64(st.Attributes),
-		"nlink":               st.Nlink,
-		"uid":                 st.Uid,
-		"gid":                 st.Gid,
-		"mode":                hex16(st.Mode),
-		"ino":                 st.Ino,
-		"size":                st.Size,
-		"blocks":              st.Blocks,
-		"attributes_mask":     hex64(st.Attributes_mask),
-		"atime":               statxTimestampInfo(st.Atime),
-		"btime":               statxTimestampInfo(st.Btime),
-		"ctime":               statxTimestampInfo(st.Ctime),
-		"mtime":               statxTimestampInfo(st.Mtime),
-		"rdev_major":          st.Rdev_major,
-		"rdev_minor":          st.Rdev_minor,
-		"dev_major":           st.Dev_major,
-		"dev_minor":           st.Dev_minor,
-		"mnt_id":              st.Mnt_id,
-		"dio_mem_align":       st.Dio_mem_align,
-		"dio_offset_align":    st.Dio_offset_align,
-		"subvol":              st.Subvol,
-		"atomic_write_min":    st.Atomic_write_unit_min,
-		"atomic_write_max":    st.Atomic_write_unit_max,
-		"atomic_write_segs":   st.Atomic_write_segments_max,
-		"dio_read_offset":     st.Dio_read_offset_align,
-		"atomic_write_max_op": st.Atomic_write_unit_max_opt,
-	}
-}
-
-func statxTimestampInfo(ts unix.StatxTimestamp) map[string]any {
-	return map[string]any{"sec": ts.Sec, "nsec": ts.Nsec}
 }
 
 func rlimitInfo(limit unix.Rlimit) map[string]any {

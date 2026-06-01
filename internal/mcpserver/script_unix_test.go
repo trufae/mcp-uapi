@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -24,7 +25,10 @@ func TestEvalExpandedUnixFileAndXattrAPI(t *testing.T) {
 const fd = sys.openat({path: args.path, flags: "O_RDWR|O_CREAT|O_TRUNC|O_CLOEXEC", mode: "0600", handle: "scriptFile"});
 sys.write({handle: "scriptFile", data_utf8: "hello unix"});
 const fstatat = sys.fstatat({path: args.path});
-const statx = sys.statx({path: args.path, mask: "STATX_BASIC_STATS"});
+const statxConstants = sys.constants({group: "statx"}).constants;
+const statx = statxConstants.STATX_BASIC_STATS === undefined
+  ? {ok: false, errno_name: "ENOSYS"}
+  : sys.statx({path: args.path, mask: "STATX_BASIC_STATS"});
 const access = sys.access({path: args.path, mode: "R_OK|W_OK"});
 const dup = sys.dup({handle: "scriptFile", new_handle: "scriptDup"});
 const flags = sys.fcntlInt({handle: "scriptDup", cmd: "F_GETFL"});
@@ -47,8 +51,14 @@ return {fd, fstatat, statx, access, dup, flags, symlink, target, setxattr, getxa
 		t.Fatalf("eval failed: result=%#v resp=%#v", result, resp)
 	}
 	value := resp.Result.(map[string]any)
-	for _, key := range []string{"fd", "fstatat", "statx", "access", "dup", "flags", "symlink", "target", "rename", "renamedStat"} {
+	for _, key := range []string{"fd", "fstatat", "access", "dup", "flags", "symlink", "target", "rename", "renamedStat"} {
 		requireNestedOK(t, value, key)
+	}
+	statx := nestedMap(t, value, "statx")
+	if runtime.GOOS == "linux" {
+		requireNestedOK(t, value, "statx")
+	} else if !knownUnsupportedSyscall(statx) {
+		t.Fatalf("statx failed unexpectedly: %#v", statx)
 	}
 	if target := nestedMap(t, value, "target")["target"]; target != path {
 		t.Fatalf("readlinkat target = %#v, want %q", target, path)
@@ -69,6 +79,10 @@ return {fd, fstatat, statx, access, dup, flags, symlink, target, setxattr, getxa
 }
 
 func TestEvalExpandedUnixEventTransferAndPipeAPI(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("eventfd, memfd, pipe2 flags, and copy_file_range are Linux-specific")
+	}
+
 	app, _ := New(Config{})
 	defer app.Close()
 
@@ -126,6 +140,10 @@ return {eventfd, pipe, pipeRead, nonblock, src, dst, copied, copiedRead, state: 
 }
 
 func TestEvalAdditionalUnixVectorAndProcessAPI(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("memfd, fallocate, fadvise, pidfd, and raw syscall coverage is Linux-specific")
+	}
+
 	app, _ := New(Config{})
 	defer app.Close()
 
@@ -181,6 +199,10 @@ return {fd, writev, preadv, fallocate, fadvise, ids, page, clock, rlimit, random
 }
 
 func TestEvalProcessVMReadvChildMemory(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("process_vm_readv is Linux-specific")
+	}
+
 	app, _ := New(Config{})
 	defer app.Close()
 

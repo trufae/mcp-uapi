@@ -10,7 +10,7 @@
 
 It's late. You're staring at an embedded Linux device — a router, an IoT gateway, some weird MIPS box pulled from a rack. You need to reverse a complex IPC protocol, poke at ioctls, trace syscalls, spray sockets, attach eBPF probes. The device ships a minimal shell. No `lsof`. No `strace`. `busybox` if you're lucky. You could spend hours cross-compiling static binaries, or you could drop one binary on the box and let your AI agent figure out the rest.
 
-**mcp-uapi** is that bridge. An MCP server that exposes raw Linux user-mode APIs through a JavaScript eval layer so AI agents can reach straight into the kernel — sockets, ptrace, ioctl, mmap, eBPF, epoll, inotify, netlink primitives — without a C compiler, without ELF loading, without toolchain hell. Drop the binary on the box, point your agent at it, and start interrogating the system.
+**mcp-uapi** is that bridge. An MCP server that exposes raw Unix user-mode APIs through a JavaScript eval layer so AI agents can reach straight into the kernel — sockets, ptrace, ioctl, mmap, and on Linux eBPF, epoll, inotify, netlink primitives — without a C compiler, without ELF loading, without toolchain hell. Drop the binary on the box, point your agent at it, and start interrogating the system.
 
 It's built for hackers. Embedded pentesters. Reverse engineers who need to give their agents real teeth on real hardware, right now, with zero ceremony.
 
@@ -18,7 +18,7 @@ It's built for hackers. Embedded pentesters. Reverse engineers who need to give 
 
 ## What's Under The Hood
 
-A single Go binary. No runtime dependencies. Cross-compiles to **13 Linux targets** (386, amd64, arm, arm64, loong64, mips, mips64, mips64le, mipsle, ppc64, ppc64le, riscv64, s390x).
+A single Go binary. No runtime dependencies for the normal Linux/macOS builds. Cross-compiles to **13 Linux targets** (386, amd64, arm, arm64, loong64, mips, mips64, mips64le, mipsle, ppc64, ppc64le, riscv64, s390x), plus macOS on amd64/arm64. iOS builds are supported on macOS through Go's external Apple SDK linker path.
 
 Agents connect over MCP (stdio or HTTP) and get access to:
 
@@ -35,7 +35,7 @@ Agents connect over MCP (stdio or HTTP) and get access to:
 
 ## Why Go?
 
-Embedded Linux devices are a mess of libc variants — glibc, musl, uclibc-ng, you name it. Go sidesteps the problem entirely: it compiles to **static binaries with syscalls issued directly against the kernel**, no libc dependency in sight. `golang.org/x/sys/unix` provides a massive surface of Linux syscall wrappers — everything from `prctl` to `ptrace` to `copy_file_range` — without touching a C toolchain. cgo is disabled, so the binary has no dynamic linkage whatsoever. Drop it on a box running some ancient Buildroot snapshot from 2017 and it just works.
+Embedded Linux devices are a mess of libc variants — glibc, musl, uclibc-ng, you name it. Go sidesteps the problem entirely: it compiles to **static binaries with syscalls issued directly against the kernel**, no libc dependency in sight. `golang.org/x/sys/unix` provides a massive surface of syscall wrappers — everything from `prctl` to `ptrace` to `copy_file_range` on Linux, with portable Unix equivalents where macOS/iOS expose them. Linux and macOS builds keep cgo disabled by default; iOS uses Go's required external Apple SDK linker path.
 
 ---
 
@@ -80,7 +80,9 @@ Cross-compile for your target:
 ```bash
 ./scripts/build-target.sh linux/arm64    # your Raspberry Pi
 ./scripts/build-target.sh linux/mips     # that weird router
-./scripts/build-all-targets.sh           # all 13 targets at once
+./scripts/build-target.sh darwin/arm64   # macOS Apple Silicon
+./scripts/build-target.sh ios/arm64      # iOS device, from macOS/Xcode
+./scripts/build-all-targets.sh           # Linux + macOS, and iOS when run on macOS
 ```
 
 Agents should read `uapi://agent-guide` and `uapi://scripting-api` as MCP resources right after connecting. Use `sys.capabilities()` inside eval to probe what's available.

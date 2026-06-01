@@ -19,14 +19,17 @@ func (a *App) handleUname(ctx context.Context, request mcp.CallToolRequest) (*mc
 	if err := unix.Uname(&uts); err != nil {
 		return syscallResult(nil, err)
 	}
-	return syscallResult(map[string]any{
-		"sysname":    unix.ByteSliceToString(uts.Sysname[:]),
-		"nodename":   unix.ByteSliceToString(uts.Nodename[:]),
-		"release":    unix.ByteSliceToString(uts.Release[:]),
-		"version":    unix.ByteSliceToString(uts.Version[:]),
-		"machine":    unix.ByteSliceToString(uts.Machine[:]),
-		"domainname": unix.ByteSliceToString(uts.Domainname[:]),
-	}, nil)
+	fields := map[string]any{
+		"sysname":  unix.ByteSliceToString(uts.Sysname[:]),
+		"nodename": unix.ByteSliceToString(uts.Nodename[:]),
+		"release":  unix.ByteSliceToString(uts.Release[:]),
+		"version":  unix.ByteSliceToString(uts.Version[:]),
+		"machine":  unix.ByteSliceToString(uts.Machine[:]),
+	}
+	if domainname := platformUnameDomainname(uts); domainname != "" {
+		fields["domainname"] = domainname
+	}
+	return syscallResult(fields, nil)
 }
 
 func (a *App) handleGetpid(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -85,7 +88,7 @@ func (a *App) handlePtraceAttach(ctx context.Context, request mcp.CallToolReques
 	if args.PID <= 0 {
 		return toolError(fmt.Errorf("pid must be greater than zero"))
 	}
-	err := unix.PtraceAttach(args.PID)
+	err := platformPtraceAttach(args.PID)
 	fields := map[string]any{"pid": args.PID, "attached": err == nil}
 	if err != nil {
 		return syscallResult(fields, err)
@@ -121,7 +124,7 @@ func (a *App) handlePtraceDetach(ctx context.Context, request mcp.CallToolReques
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	err := unix.PtraceDetach(args.PID)
+	err := platformPtraceDetach(args.PID)
 	return syscallResult(map[string]any{"pid": args.PID, "detached": err == nil}, err)
 }
 
@@ -141,7 +144,7 @@ func (a *App) handlePtraceRead(ctx context.Context, request mcp.CallToolRequest)
 		return toolError(fmt.Errorf("length %d exceeds max_read_bytes %d", args.Length, a.config.MaxReadBytes))
 	}
 	data := make([]byte, int(args.Length))
-	n, err := unix.PtracePeekData(args.PID, uintptr(args.Address), data)
+	n, err := platformPtracePeekData(args.PID, uintptr(args.Address), data)
 	fields := map[string]any{"pid": args.PID, "address": hex64(uint64(args.Address)), "bytes_read": n}
 	if err == nil {
 		encoded, encErr := encodeBytes(data[:n], args.Encoding)
@@ -172,7 +175,7 @@ func (a *App) handlePtraceWrite(ctx context.Context, request mcp.CallToolRequest
 	if err != nil {
 		return toolError(err)
 	}
-	n, pokeErr := unix.PtracePokeData(args.PID, uintptr(args.Address), data)
+	n, pokeErr := platformPtracePokeData(args.PID, uintptr(args.Address), data)
 	return syscallResult(map[string]any{"pid": args.PID, "address": hex64(uint64(args.Address)), "bytes_requested": len(data), "bytes_written": n, "checksum64": checksum64(data)}, pokeErr)
 }
 
@@ -186,7 +189,7 @@ func (a *App) handlePtraceCont(ctx context.Context, request mcp.CallToolRequest)
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	err := unix.PtraceCont(args.PID, int(args.Signal))
+	err := platformPtraceCont(args.PID, int(args.Signal))
 	return syscallResult(map[string]any{"pid": args.PID, "signal": int(args.Signal)}, err)
 }
 
@@ -195,7 +198,7 @@ func (a *App) handlePtraceSyscall(ctx context.Context, request mcp.CallToolReque
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	err := unix.PtraceSyscall(args.PID, int(args.Signal))
+	err := platformPtraceSyscall(args.PID, int(args.Signal))
 	return syscallResult(map[string]any{"pid": args.PID, "signal": int(args.Signal)}, err)
 }
 
@@ -204,8 +207,7 @@ func (a *App) handlePtraceGetRegs(ctx context.Context, request mcp.CallToolReque
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	var regs unix.PtraceRegs
-	err := unix.PtraceGetRegs(args.PID, &regs)
+	regs, err := platformPtraceGetRegs(args.PID)
 	fields := map[string]any{"pid": args.PID, "arch": runtime.GOARCH}
 	if err == nil {
 		raw, scalars, arrays := ptraceRegsInfo(regs)
@@ -227,11 +229,11 @@ func (a *App) handlePtraceSetOptions(ctx context.Context, request mcp.CallToolRe
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	err := unix.PtraceSetOptions(args.PID, int(args.Options))
+	err := platformPtraceSetOptions(args.PID, int(args.Options))
 	return syscallResult(map[string]any{"pid": args.PID, "options": int(args.Options)}, err)
 }
 
-func ptraceRegsInfo(regs unix.PtraceRegs) (map[string]any, map[string]uint64, map[string][]uint64) {
+func ptraceRegsInfo(regs any) (map[string]any, map[string]uint64, map[string][]uint64) {
 	value := reflect.ValueOf(regs)
 	typ := value.Type()
 	raw := map[string]any{}
@@ -404,7 +406,7 @@ func (a *App) handlePrctl(ctx context.Context, request mcp.CallToolRequest) (*mc
 	if err := bind(request, &args); err != nil {
 		return toolError(err)
 	}
-	err := unix.Prctl(int(args.Option), uintptr(args.Arg2), uintptr(args.Arg3), uintptr(args.Arg4), uintptr(args.Arg5))
+	err := platformPrctl(int(args.Option), uintptr(args.Arg2), uintptr(args.Arg3), uintptr(args.Arg4), uintptr(args.Arg5))
 	return syscallResult(map[string]any{"option": int(args.Option), "arg2": hex64(uint64(args.Arg2)), "arg3": hex64(uint64(args.Arg3)), "arg4": hex64(uint64(args.Arg4)), "arg5": hex64(uint64(args.Arg5))}, err)
 }
 

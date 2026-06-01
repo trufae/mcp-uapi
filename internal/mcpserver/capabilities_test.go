@@ -1,6 +1,7 @@
 package mcpserver
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 
@@ -128,6 +129,10 @@ func TestEmbeddedDocsAndExamples(t *testing.T) {
 }
 
 func TestEmbeddedNetworkInterfaceExampleExecutes(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("network interface example reads /proc/net/dev")
+	}
+
 	app, _ := New(Config{})
 	defer app.Close()
 

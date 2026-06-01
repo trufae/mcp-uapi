@@ -490,9 +490,9 @@ func syscallStatInfo(st syscall.Stat_t) map[string]any {
 		"size":       st.Size,
 		"blksize":    st.Blksize,
 		"blocks":     st.Blocks,
-		"atime_sec":  st.Atim.Sec,
-		"mtime_sec":  st.Mtim.Sec,
-		"ctime_sec":  st.Ctim.Sec,
+		"atime_sec":  platformSyscallStatAtime(st),
+		"mtime_sec":  platformSyscallStatMtime(st),
+		"ctime_sec":  platformSyscallStatCtime(st),
 	}
 }
 
