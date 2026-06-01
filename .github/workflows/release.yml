@@ -1,0 +1,105 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - { goos: linux, goarch: "386" }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm, goarm: "7" }
+          - { goos: linux, goarch: arm64 }
+          - { goos: linux, goarch: loong64 }
+          - { goos: linux, goarch: mips }
+          - { goos: linux, goarch: mips64 }
+          - { goos: linux, goarch: mips64le }
+          - { goos: linux, goarch: mipsle }
+          - { goos: linux, goarch: ppc64 }
+          - { goos: linux, goarch: ppc64le }
+          - { goos: linux, goarch: riscv64 }
+          - { goos: linux, goarch: s390x }
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compute artifact name
+        id: name
+        run: |
+          GOOS="${{ matrix.target.goos }}"
+          GOARCH="${{ matrix.target.goarch }}"
+          GOARM="${{ matrix.target.goarm }}"
+          if [[ -n "${GOARM}" ]]; then
+            echo "artifact=mcp-uapi-${GOOS}-${GOARCH}-v${GOARM}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "artifact=mcp-uapi-${GOOS}-${GOARCH}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Build
+        env:
+          GOOS: "${{ matrix.target.goos }}"
+          GOARCH: "${{ matrix.target.goarch }}"
+          GOARM: "${{ matrix.target.goarm }}"
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p bin
+          go build -trimpath -o "bin/${{ steps.name.outputs.artifact }}" ./cmd/mcp-uapi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: "${{ steps.name.outputs.artifact }}"
+          path: "bin/${{ steps.name.outputs.artifact }}"
+
+  create-release:
+    needs: build-and-release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "${{ github.ref_name }}"
+          body: |
+            ## ${{ github.ref_name }}
+
+            Pre-built Linux binaries for all supported targets.
+
+            | File | GOOS | GOARCH |
+            |------|------|--------|
+            | mcp-uapi-linux-386 | linux | 386 |
+            | mcp-uapi-linux-amd64 | linux | amd64 |
+            | mcp-uapi-linux-arm-v7 | linux | arm (v7) |
+            | mcp-uapi-linux-arm64 | linux | arm64 |
+            | mcp-uapi-linux-loong64 | linux | loong64 |
+            | mcp-uapi-linux-mips | linux | mips |
+            | mcp-uapi-linux-mips64 | linux | mips64 |
+            | mcp-uapi-linux-mips64le | linux | mips64le |
+            | mcp-uapi-linux-mipsle | linux | mipsle |
+            | mcp-uapi-linux-ppc64 | linux | ppc64 |
+            | mcp-uapi-linux-ppc64le | linux | ppc64le |
+            | mcp-uapi-linux-riscv64 | linux | riscv64 |
+            | mcp-uapi-linux-s390x | linux | s390x |
+          files: artifacts/*/mcp-uapi-*
+          generate_release_notes: true
