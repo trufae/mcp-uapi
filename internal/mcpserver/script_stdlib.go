@@ -6,6 +6,7 @@ import (
 	"fmt"
 	stdio "io"
 	"io/fs"
+	stdnet "net"
 	stdos "os"
 	"sort"
 	"strings"
@@ -326,6 +327,32 @@ func addGoErrorFields(fields map[string]any, err error) {
 	var sysErr *stdos.SyscallError
 	if errors.As(err, &sysErr) {
 		fields["syscall"] = sysErr.Syscall
+	}
+	var netErr stdnet.Error
+	if errors.As(err, &netErr) {
+		fields["timeout"] = netErr.Timeout()
+		fields["temporary"] = netErr.Temporary()
+	}
+	var opErr *stdnet.OpError
+	if errors.As(err, &opErr) {
+		fields["op"] = opErr.Op
+		fields["network"] = opErr.Net
+		fields["source_addr"] = netAddrInfo(opErr.Source)
+		fields["addr"] = netAddrInfo(opErr.Addr)
+	}
+	var dnsErr *stdnet.DNSError
+	if errors.As(err, &dnsErr) {
+		fields["error_name"] = "DNSError"
+		fields["dns_name"] = dnsErr.Name
+		fields["dns_server"] = dnsErr.Server
+		fields["timeout"] = dnsErr.IsTimeout
+		fields["temporary"] = dnsErr.IsTemporary
+		fields["not_found"] = dnsErr.IsNotFound
+	}
+	var addrErr *stdnet.AddrError
+	if errors.As(err, &addrErr) {
+		fields["error_name"] = "AddrError"
+		fields["addr"] = addrErr.Addr
 	}
 	var errno syscall.Errno
 	if errors.As(err, &errno) {
@@ -2438,6 +2465,7 @@ func (e *scriptEnv) scriptOSProcessWait(value goja.Value) (any, error) {
 
 type scriptIOEndpoint struct {
 	Handle       string `json:"handle"`
+	Conn         string `json:"conn"`
 	FD           *int   `json:"fd"`
 	Path         string `json:"path"`
 	Name         string `json:"name"`
@@ -2482,6 +2510,9 @@ func endpointDataSources(endpoint scriptIOEndpoint) int {
 	if endpoint.Handle != "" || endpoint.FD != nil {
 		sources++
 	}
+	if endpoint.Conn != "" {
+		sources++
+	}
 	if endpoint.Path != "" || endpoint.Name != "" {
 		sources++
 	}
@@ -2516,6 +2547,9 @@ func (e *scriptEnv) readerFromEndpoint(endpoint scriptIOEndpoint) (stdio.Reader,
 			return nil, nil, err
 		}
 		return file, cleanup, nil
+	}
+	if endpoint.Conn != "" {
+		return netReaderFromConn(e, endpoint.Conn)
 	}
 	if endpoint.Path != "" || endpoint.Name != "" {
 		path := endpoint.Path
@@ -2570,6 +2604,9 @@ func (e *scriptEnv) writerFromEndpoint(endpoint scriptIOEndpoint) (stdio.Writer,
 			return nil, nil, err
 		}
 		return file, cleanup, nil
+	}
+	if endpoint.Conn != "" {
+		return netWriterFromConn(e, endpoint.Conn)
 	}
 	if endpoint.Path != "" || endpoint.Name != "" {
 		path := endpoint.Path

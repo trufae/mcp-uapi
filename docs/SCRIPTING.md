@@ -27,7 +27,8 @@ Globals:
 - `sys`: synchronous Linux `golang.org/x/sys/unix` scripting API plus managed handle helpers.
 - `uapi`: alias for `sys` for compatibility with older scripts.
 - `os`: synchronous Go package `os` style wrappers for files, directories, env, roots, processes, and File methods over managed handles.
-- `io`: synchronous Go package `io` style copy/read/write helpers over managed handle, buffer, path, data, and discard endpoints.
+- `io`: synchronous Go package `io` style copy/read/write helpers over managed handle, net connection, buffer, path, data, and discard endpoints.
+- `net`: synchronous Go package `net` style wrappers for TCP/IP, UDP, Unix domain sockets, DNS resolution, interfaces, and managed `net.Conn`/`net.Listener`/`net.PacketConn` handles.
 
 Not globals: `uapi.request`, `sys.request`, `fetch`, `XMLHttpRequest`, `require`, `import`, Node.js modules, or server-terminating helpers such as `os.Exit`. Inside eval, use `sys.capabilities()` for the same machine-readable capability data that is served as `uapi://capabilities`.
 
@@ -39,6 +40,7 @@ return {
   wrappers: caps.scripting_api.uapi_wrappers,
   osWrappers: caps.scripting_api.os_wrappers,
   ioWrappers: caps.scripting_api.io_wrappers,
+  netWrappers: caps.scripting_api.net_wrappers,
   uname: sys.uname(),
   openFlags: sys.constants({group: "open_flags"}).constants,
   atConstants: sys.constants({group: "at"}).constants
@@ -47,7 +49,7 @@ return {
 
 Every syscall-style helper returns `ok: true` on success. Linux errno failures are structured observations with `ok: false`, `errno`, `errno_name`, and `error`; malformed arguments throw eval errors.
 
-Go `os`/`io` helpers also return `ok: true` on success. Package errors return `ok: false` with `error`, `error_type`, and when available `error_name`, `op`, `path`, `errno`, and `errno_name`.
+Go `os`/`io`/`net` helpers also return `ok: true` on success. Package errors return `ok: false` with `error`, `error_type`, and when available `error_name`, `op`, `path`, `network`, `timeout`, `errno`, and `errno_name`.
 
 Inside eval, ptrace helper calls automatically pin the eval goroutine to one OS thread until the script returns. Linux ptrace tracks the tracer task, so multi-step flows such as attach, syscall-step, wait, read registers, and detach should be kept in one eval call. `sys.ptraceGetRegs` includes normalized syscall metadata with a build-time generated syscall `name` when known.
 
@@ -62,6 +64,7 @@ Common script groups:
 - eBPF: `sys.ebpfInfo`, `sys.ebpfRemoveMemlock`, `sys.ebpfFeatureProbe`, `sys.ebpfBTFKernelInfo`, `sys.ebpfMapCreate`, `sys.ebpfMapLoadPinned`, `sys.ebpfMapLookup`, `sys.ebpfMapUpdate`, `sys.ebpfMapEntries`, `sys.ebpfProgramLoad`, `sys.ebpfProgramTest`, `sys.ebpfAttachSocketFilter`, `sys.ebpfAttachKprobe`, `sys.ebpfAttachKretprobe`, `sys.ebpfAttachTracepoint`, `sys.ebpfAttachRawTracepoint`, `sys.ebpfAttachXDP`, `sys.ebpfLinkInfo`, `sys.ebpfLinkClose`, `sys.ebpfRingbufReaderCreate`, `sys.ebpfRingbufRead`, `sys.ebpfPerfReaderCreate`, `sys.ebpfPerfRead`. `sys.ebpfProgramLoad` accepts self-contained built-in kinds such as `return`, `counter`, `perf_event`, `ringbuf_event`, `socket_filter_pass`, and `socket_filter_drop`; scripts do not need target-side C compilation, raw assembly, or ELF loading.
 - Go os package: `os.readFile`, `os.writeFile`, `os.open`, `os.openFile`, `os.create`, `os.openRoot`, `os.rootReadFile`, `os.rootWriteFile`, `os.fileRead`, `os.fileWrite`, `os.fileSeek`, `os.fileStat`, `os.fileClose`, `os.getenv`, `os.setenv`, `os.getwd`, `os.readDir`, `os.stat`, `os.findProcess`, `os.startProcess`.
 - Go io package: `io.copy`, `io.copyBuffer`, `io.copyN`, `io.readAll`, `io.readAtLeast`, `io.readFull`, `io.writeString`, `io.limitReader`, `io.multiReader`, `io.teeReader`, `io.multiWriter`, `io.newSectionReader`, `io.newOffsetWriter`, `io.pipe`.
+- Go net package: `net.dial`, `net.listen`, `net.listenPacket`, `net.lookupHost`, `net.lookupIP`, `net.lookupPort`, `net.resolveTCPAddr`, `net.resolveUDPAddr`, `net.resolveUnixAddr`, `net.connRead`, `net.connWrite`, `net.connClose`, `net.listenerAccept`, `net.listenerClose`, `net.packetReadFrom`, and `net.packetWriteTo`.
 
 Socketpair example:
 
@@ -100,6 +103,21 @@ try {
   os.fileClose({handle: "copySrc"});
   os.fileClose({handle: "copyDst"});
 }
+```
+
+Go net TCP echo example:
+
+```javascript
+const listener = net.listen({network: "tcp", address: "127.0.0.1:0", handle: "tcpListener"});
+const address = net.listenerAddr({listener: "tcpListener"}).addr.address;
+const client = net.dial({network: "tcp", address, timeout_ms: 1000, handle: "tcpClient"});
+const server = net.listenerAccept({listener: "tcpListener", conn_handle: "tcpServer", timeout_ms: 1000});
+net.connWrite({conn: "tcpClient", data_utf8: "ping"});
+const got = net.connRead({conn: "tcpServer", length: 4, encoding: "utf8", timeout_ms: 1000});
+net.connClose({conn: "tcpClient"});
+net.connClose({conn: "tcpServer"});
+net.listenerClose({listener: "tcpListener"});
+return got;
 ```
 
 Self-contained eBPF socket-filter example:

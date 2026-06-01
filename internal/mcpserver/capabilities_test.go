@@ -66,6 +66,11 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 			t.Fatalf("io scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.IOWrappers)
 		}
 	}
+	for _, name := range []string{"dial", "listen", "listenPacket", "lookupHost", "connRead", "packetReadFrom"} {
+		if !containsString(doc.ScriptingAPI.NetWrappers, name) {
+			t.Fatalf("net scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.NetWrappers)
+		}
+	}
 	for _, name := range []string{"openat", "fstatat", "statx", "eventfd", "memfdCreate", "getxattr", "copyFileRange"} {
 		if !containsString(doc.ScriptingAPI.UAPIWrappers, name) {
 			t.Fatalf("scripting wrappers missing %s: %#v", name, doc.ScriptingAPI.UAPIWrappers)
@@ -79,7 +84,7 @@ func TestCapabilitiesExposeRequiredSurface(t *testing.T) {
 	if !containsString(doc.ScriptingAPI.NotAvailable, "uapi.request") || !containsString(doc.ScriptingAPI.NotAvailable, "fetch") || !containsString(doc.ScriptingAPI.NotAvailable, "os.Exit/os.exit") {
 		t.Fatalf("scripting API should document unavailable request/fetch helpers: %#v", doc.ScriptingAPI.NotAvailable)
 	}
-	for _, group := range []string{"open_flags", "at", "eventfd", "inotify", "statx", "rlimit", "go_os", "go_io"} {
+	for _, group := range []string{"open_flags", "at", "eventfd", "inotify", "statx", "rlimit", "go_os", "go_io", "go_net"} {
 		if _, ok := doc.Constants[group]; !ok {
 			t.Fatalf("capabilities missing %s constants", group)
 		}
@@ -183,7 +188,7 @@ func TestEmbeddedResourcesAreReadableThroughMCP(t *testing.T) {
 	for _, resource := range listed.Resources {
 		resourceURIs = append(resourceURIs, resource.URI)
 	}
-	for _, uri := range []string{"uapi://docs", "uapi://tools-guide", "uapi://api", "uapi://api/sys-unix", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js"} {
+	for _, uri := range []string{"uapi://docs", "uapi://tools-guide", "uapi://api", "uapi://api/sys-unix", "uapi://api/go-net", "uapi://examples", "uapi://examples/001-network-interfaces-ioctl.js", "uapi://examples/010-net-tcp-port-scanner.js", "uapi://examples/011-net-unix-domain-socket-echo.js"} {
 		if !containsString(resourceURIs, uri) {
 			t.Fatalf("listed resources missing %s: %#v", uri, resourceURIs)
 		}
